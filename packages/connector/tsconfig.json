@@ -1,0 +1,19 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "types": ["node"],
+    // Typecheck only — the dist build's declarations come from tsup. Disabling
+    // declaration emit here also silences TS2742 on the framework-shim return
+    // types when the `examples/` are pulled into the program.
+    "declaration": false,
+    "declarationMap": false,
+    "baseUrl": ".",
+    "paths": {
+      "@askdepth/audience-connector": ["src/index.ts"],
+      "@askdepth/audience-connector/express": ["src/shims/express.ts"],
+      "@askdepth/audience-connector/fastify": ["src/shims/fastify.ts"],
+      "@askdepth/audience-connector/lambda": ["src/shims/lambda.ts"]
+    }
+  },
+  "include": ["src/**/*.ts", "__tests__/**/*.ts", "../../examples/**/*.ts"]
+}

@@ -1,0 +1,69 @@
+{
+  "name": "@askdepth/audience-connector",
+  "version": "0.1.0",
+  "description": "The Askdepth Audience SDK connector — a Web-standard Request → Response handler a client deploys inside their own perimeter. Zero runtime dependencies in core; postgres and rest adapters; Express/Fastify/Lambda shims.",
+  "license": "MIT",
+  "type": "module",
+  "sideEffects": false,
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    },
+    "./express": {
+      "types": "./dist/shims/express.d.ts",
+      "import": "./dist/shims/express.js",
+      "require": "./dist/shims/express.cjs"
+    },
+    "./fastify": {
+      "types": "./dist/shims/fastify.d.ts",
+      "import": "./dist/shims/fastify.js",
+      "require": "./dist/shims/fastify.cjs"
+    },
+    "./lambda": {
+      "types": "./dist/shims/lambda.d.ts",
+      "import": "./dist/shims/lambda.js",
+      "require": "./dist/shims/lambda.cjs"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": ["dist"],
+  "publishConfig": { "access": "public" },
+  "scripts": {
+    "build": "tsup",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "build:node": "node ./node_modules/tsup/dist/cli-node.js",
+    "test:node": "node ./node_modules/vitest/vitest.mjs run",
+    "test:node:watch": "node ./node_modules/vitest/vitest.mjs",
+    "typecheck:node": "node ./node_modules/typescript/bin/tsc --noEmit"
+  },
+  "dependencies": {
+    "@askdepth/audience-contract": "workspace:*"
+  },
+  "peerDependencies": {
+    "express": ">=4",
+    "fastify": ">=4",
+    "pg": ">=8"
+  },
+  "peerDependenciesMeta": {
+    "express": { "optional": true },
+    "fastify": { "optional": true },
+    "pg": { "optional": true }
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.0",
+    "@types/node": "^22.10.2",
+    "@types/pg": "^8.11.10",
+    "express": "^5.0.1",
+    "fastify": "^5.1.0",
+    "pg": "^8.13.1",
+    "tsup": "^8.3.5",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.9"
+  }
+}
