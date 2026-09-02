@@ -1,0 +1,6 @@
+name = "audience-connector-worker-smoke"
+main = "index.js"
+compatibility_date = "2024-09-23"
+
+# Required: the contract's signing helper uses `node:crypto`.
+compatibility_flags = ["nodejs_compat"]
