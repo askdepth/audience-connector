@@ -1,0 +1,18 @@
+{
+  "name": "@askdepth/audience-connector-workspace",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Workspace root for the Askdepth Audience SDK. No publishable code lives here; see packages/*.",
+  "license": "MIT",
+  "scripts": {
+    "build": "pnpm --recursive run build",
+    "test": "pnpm --recursive run test",
+    "typecheck": "pnpm --recursive run typecheck"
+  },
+  "devDependencies": {
+    "wrangler": "^3.114.14"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
