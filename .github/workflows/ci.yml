@@ -1,0 +1,84 @@
+name: CI
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  workspace:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: connector_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      CI: 'true'
+      TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/connector_test
+
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with: { version: 9 }
+      - uses: actions/setup-node@v7
+        with: { node-version: 22 }
+      - run: pnpm install --frozen-lockfile
+      # Build first so `@askdepth/audience-connector` can resolve the built
+      # `@askdepth/audience-contract` dist, and so the connector's
+      # build-artefact test has something to assert against.
+      - run: pnpm --recursive run build
+      - run: pnpm --recursive run typecheck
+      - run: pnpm --recursive run test
+      # Same handler, Node runtime, exercising the built dist.
+      - run: node examples/smoke.mjs
+
+  runtimes:
+    # S9 — the multi-runtime claim is demonstrated, not asserted.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with: { version: 9 }
+      - uses: actions/setup-node@v7
+        with: { node-version: 22 }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --recursive run build
+
+      - uses: denoland/setup-deno@v2
+        with: { deno-version: v2.x }
+      - run: deno run --allow-read --allow-env --allow-sys examples/smoke.mjs
+
+      - uses: oven-sh/setup-bun@v2
+        with: { bun-version: latest }
+      - run: bun examples/smoke.mjs
+
+  workers:
+    # S9 — Cloudflare Workers, verified only with `nodejs_compat`.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with: { version: 9 }
+      - uses: actions/setup-node@v7
+        with: { node-version: 22 }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --recursive run build
+      # `examples/worker/smoke.mjs` boots the worker under workerd via
+      # wrangler's `unstable_dev` and drives a signed request. `wrangler` is a
+      # dev dependency of `packages/connector`.
+      - run: node examples/worker/smoke.mjs
+        working-directory: .
