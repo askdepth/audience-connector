@@ -3,6 +3,13 @@
   "version": "0.1.0",
   "description": "The Askdepth Audience SDK connector — a Web-standard Request → Response handler a client deploys inside their own perimeter. Zero runtime dependencies in core; postgres and rest adapters; Express/Fastify/Lambda shims.",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/askdepth/audience-connector.git",
+    "directory": "packages/connector"
+  },
+  "homepage": "https://github.com/askdepth/audience-connector/tree/main/packages/connector#readme",
+  "bugs": "https://github.com/askdepth/audience-connector/issues",
   "type": "module",
   "sideEffects": false,
   "main": "./dist/index.cjs",
