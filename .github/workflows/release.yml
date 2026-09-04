@@ -37,9 +37,9 @@ jobs:
         run: pnpm --filter @askdepth/audience-contract publish --no-git-checks --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-          # PROVENANCE: uncomment once this repo is PUBLIC. Provenance from a
-          # private repo is not publicly verifiable and can fail the publish.
-          # NPM_CONFIG_PROVENANCE: 'true'
+          # Requires this repo to be public (provenance links to public source)
+          # and `id-token: write` on the job (set above).
+          NPM_CONFIG_PROVENANCE: 'true'
 
       # 2. Do not publish the connector until the contract version it pins is
       #    actually visible on the registry (npm is not read-your-writes).
@@ -62,4 +62,4 @@ jobs:
         run: pnpm --filter @askdepth/audience-connector publish --no-git-checks --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-          # NPM_CONFIG_PROVENANCE: 'true'   # see note above
+          NPM_CONFIG_PROVENANCE: 'true'
