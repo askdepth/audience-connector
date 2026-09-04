@@ -1,11 +1,16 @@
 name: Release
+
+# Push a tag like `v0.1.0` on `main` to publish. Both packages are published
+# from a single job, in order, because @askdepth/audience-connector depends on a
+# pinned exact version of @askdepth/audience-contract that must already resolve
+# on the registry.
 on:
   push:
     tags: ['v*']
 
 permissions:
   contents: read
-  id-token: write   # npm provenance
+  id-token: write # required for npm provenance (see PROVENANCE note below)
 
 jobs:
   publish:
@@ -16,10 +21,45 @@ jobs:
         with: { version: 9 }
       - uses: actions/setup-node@v7
         with: { node-version: 22, registry-url: 'https://registry.npmjs.org' }
+
       - run: pnpm install --frozen-lockfile
-      - run: pnpm --filter @askdepth/audience-contract build
-      - run: pnpm --filter @askdepth/audience-contract typecheck
-      - run: pnpm --filter @askdepth/audience-contract test
-      - run: pnpm --filter @askdepth/audience-contract publish --no-git-checks
+
+      # Build + verify BOTH packages before publishing either one.
+      - run: pnpm --filter @askdepth/audience-contract  build
+      - run: pnpm --filter @askdepth/audience-contract  typecheck
+      - run: pnpm --filter @askdepth/audience-contract  test
+      - run: pnpm --filter @askdepth/audience-connector build
+      - run: pnpm --filter @askdepth/audience-connector typecheck
+      - run: pnpm --filter @askdepth/audience-connector test
+
+      # 1. Contract first.
+      - name: Publish @askdepth/audience-contract
+        run: pnpm --filter @askdepth/audience-contract publish --no-git-checks --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          # PROVENANCE: uncomment once this repo is PUBLIC. Provenance from a
+          # private repo is not publicly verifiable and can fail the publish.
+          # NPM_CONFIG_PROVENANCE: 'true'
+
+      # 2. Do not publish the connector until the contract version it pins is
+      #    actually visible on the registry (npm is not read-your-writes).
+      - name: Wait for the contract on the registry
+        run: |
+          VERSION=$(node -p "require('./packages/contract/package.json').version")
+          echo "waiting for @askdepth/audience-contract@$VERSION ..."
+          for i in $(seq 1 30); do
+            if npm view "@askdepth/audience-contract@$VERSION" version >/dev/null 2>&1; then
+              echo "visible after attempt $i"
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "::error::@askdepth/audience-contract@$VERSION not on registry after 5 min"
+          exit 1
+
+      # 3. Connector second.
+      - name: Publish @askdepth/audience-connector
+        run: pnpm --filter @askdepth/audience-connector publish --no-git-checks --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          # NPM_CONFIG_PROVENANCE: 'true'   # see note above
