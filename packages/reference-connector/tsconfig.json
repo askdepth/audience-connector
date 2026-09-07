@@ -1,0 +1,11 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "types": ["node"],
+    // Typecheck only — this package emits nothing (data + a generator script).
+    "declaration": false,
+    "declarationMap": false,
+    "noEmit": true
+  },
+  "include": ["seed/**/*.ts", "__tests__/**/*.ts"]
+}

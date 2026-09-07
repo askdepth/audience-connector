@@ -1,0 +1,29 @@
+{
+  "name": "@askdepth/reference-connector",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Reference connector for the Askdepth Audience SDK — a genuine deployable app built on @askdepth/audience-connector over one seeded synthetic user base. Never published.",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "true",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "seed:generate": "tsx seed/generate.ts"
+  },
+  "dependencies": {
+    "@askdepth/audience-connector": "workspace:*",
+    "@askdepth/audience-contract": "workspace:*",
+    "pg": "^8.13.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "@types/pg": "^8.11.10",
+    "tsx": "^4.19.2",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.9"
+  }
+}
