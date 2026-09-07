@@ -15,6 +15,7 @@
 
 import { execFile, spawn } from 'node:child_process';
 import { once } from 'node:events';
+import { readFileSync } from 'node:fs';
 import { promisify } from 'node:util';
 import { createRequire } from 'node:module';
 import { dirname, resolve } from 'node:path';
@@ -23,6 +24,31 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { Pool } from 'pg';
 import { sign } from '@askdepth/audience-contract';
 import { start, type StartedVariant } from '../src/postgres-variant';
+import { TABLE_NAME, fixturesSqlPath } from '../seed/generate';
+
+/** Load the checked-in seed into whatever Postgres `DSN` points at. The test
+ *  cannot assume the DB it is handed already has `reference_users` — the
+ *  `workspace` CI job, for instance, exports `TEST_DATABASE_URL` for the
+ *  connector's own PG tests and never loads this seed. `fixtures.sql` is
+ *  self-contained (`DROP TABLE IF EXISTS` + `CREATE` + one `INSERT`, literal
+ *  values only, no bind params) so a single `query()` applies it. */
+async function seedReferenceTable(dsn: string): Promise<void> {
+  const pool = new Pool({ connectionString: dsn });
+  try {
+    await pool.query(readFileSync(fixturesSqlPath(), 'utf8'));
+  } finally {
+    await pool.end();
+  }
+}
+
+async function dropReferenceTable(dsn: string): Promise<void> {
+  const pool = new Pool({ connectionString: dsn });
+  try {
+    await pool.query(`DROP TABLE IF EXISTS "${TABLE_NAME}"`);
+  } finally {
+    await pool.end();
+  }
+}
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
@@ -73,11 +99,13 @@ d('S7 — postgres variant over the seeded reference base', () => {
   beforeAll(async () => {
     process.env.REFERENCE_SECRET = SECRET;
     process.env.DATABASE_URL = DSN;
+    await seedReferenceTable(DSN);
     variant = await start({ port: 0 });
   });
 
   afterAll(async () => {
     await variant?.close();
+    await dropReferenceTable(DSN);
   });
 
   it('the built conformance CLI reports 15 / 15 against the variant', async () => {

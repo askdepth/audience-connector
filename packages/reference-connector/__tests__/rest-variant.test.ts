@@ -21,6 +21,7 @@
 
 import { execFile, spawn } from 'node:child_process';
 import { once } from 'node:events';
+import { readFileSync } from 'node:fs';
 import { promisify } from 'node:util';
 import { createRequire } from 'node:module';
 import { dirname, resolve } from 'node:path';
@@ -30,6 +31,7 @@ import { Pool } from 'pg';
 import { sign } from '@askdepth/audience-contract';
 import { start, declaredSchema, type StartedVariant } from '../src/rest-variant';
 import { startFixtureApi, type StartedFixtureApi } from '../src/rest-fixture-api';
+import { TABLE_NAME, fixturesSqlPath } from '../seed/generate';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
@@ -175,6 +177,15 @@ dbDescribe('S8 — rest vs postgres /schema column-name parity', () => {
     process.env.REFERENCE_SECRET = SECRET;
     process.env.DATABASE_URL = DSN;
 
+    // The DB handed to this test need not already have `reference_users`
+    // (the `workspace` CI job exports a DSN without this seed) — load it.
+    const seedPool = new Pool({ connectionString: DSN });
+    try {
+      await seedPool.query(readFileSync(fixturesSqlPath(), 'utf8'));
+    } finally {
+      await seedPool.end();
+    }
+
     const { start: startPg } = await import('../src/postgres-variant');
     const pg = await startPg({ port: 0 });
     const restFixture = await startFixtureApi();
@@ -197,6 +208,12 @@ dbDescribe('S8 — rest vs postgres /schema column-name parity', () => {
       await rest.close();
       await restFixture.close();
       await pg.close();
+      const dropPool = new Pool({ connectionString: DSN });
+      try {
+        await dropPool.query(`DROP TABLE IF EXISTS "${TABLE_NAME}"`);
+      } finally {
+        await dropPool.end();
+      }
     }
   });
 });
