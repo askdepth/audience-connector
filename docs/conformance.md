@@ -60,14 +60,12 @@ repo**, and the installed `node_modules/.bin/audience-connector` runs the full
 `__tests__/cli-packaging.test.ts` guard keeps a future `files`/tsup change from
 silently dropping the bin from the tarball.
 
-> **Open item — registry `0.1.0` predates the CLI.** The `0.1.0` of
-> `@askdepth/audience-connector` currently on the public npm registry was
-> published at the end of P2, before the conformance CLI existed, so its
-> tarball has no `bin` — `npx @askdepth/audience-connector conformance` fetched
-> fresh from the registry fails with *"could not determine executable to
-> run"*. Closing that needs a `0.1.1` publish, which is a human release
-> decision and **not part of P3**. Until it lands, consumers install the CLI
-> from a build of this repo (or a locally packed tarball).
+The CLI ships from `@askdepth/audience-connector@0.1.1` onward (the earlier
+`0.1.0` on the registry predated it and had no `bin`). From a clean directory:
+
+```
+npx @askdepth/audience-connector conformance --url <url> --secret <secret>
+```
 
 ## Flags
 

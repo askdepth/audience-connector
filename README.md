@@ -22,8 +22,8 @@ deployed connector against the §7.1 checklist before it points at production.
 
 | Package | Status | Role |
 |---|---|---|
-| [`@askdepth/audience-contract`](packages/contract) | v0.1.0 | zod schemas for the wire format, the AND-only criteria DSL, capability flags, the HMAC-SHA256 signing/verification helper, and version-negotiation logic. Imported by both the connector and the platform. Source published. |
-| [`@askdepth/audience-connector`](packages/connector) | v0.1.0 | the deployable connector: a Web-standard `Request → Response` handler, mandatory HMAC verification, the four endpoints, `postgres` + `rest` adapters, and Express/Fastify/Lambda shims. Zero runtime dependencies in core. |
+| [`@askdepth/audience-contract`](packages/contract) | v0.1.1 | zod schemas for the wire format, the AND-only criteria DSL, capability flags, the HMAC-SHA256 signing/verification helper, and version-negotiation logic. Imported by both the connector and the platform. Source published. |
+| [`@askdepth/audience-connector`](packages/connector) | v0.1.1 | the deployable connector: a Web-standard `Request → Response` handler, mandatory HMAC verification, the four endpoints, `postgres` + `rest` adapters, and Express/Fastify/Lambda shims. Zero runtime dependencies in core. Ships the `audience-connector conformance` CLI. |
 | [`@askdepth/reference-connector`](packages/reference-connector) | internal | a real connector over a seeded synthetic user base — CI fixture, sales demo, reference implementation. Two variants (`postgres`, `rest`) over the same seed. Never published. See [`docs/reference-connector.md`](docs/reference-connector.md). |
 
 ## Runtimes
