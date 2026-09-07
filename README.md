@@ -6,13 +6,17 @@ database, and answers with counts and a capped, column-mapped, read-only result
 set. Your raw data and your database credentials never leave your perimeter.
 
 This repository is a **pnpm workspace**. It ships the wire contract and the
-connector package; a reference connector lands next as a sibling package under
-`packages/`.
+connector package, plus a **reference connector** — a genuine connector instance
+over a seeded synthetic user base — and a **conformance CLI** that validates a
+deployed connector against the §7.1 checklist before it points at production.
 
 - **Deploying a connector:** [`docs/deployment.md`](docs/deployment.md)
 - **Runtime matrix:** [`docs/runtime-support.md`](docs/runtime-support.md)
-- **Conformance coverage:** [`docs/conformance-self-check.md`](docs/conformance-self-check.md)
-  maps every [`docs/conformance-spec.md`](docs/conformance-spec.md) case to its tests.
+- **Conformance CLI:** [`docs/conformance.md`](docs/conformance.md) — how to run
+  it; [`docs/conformance-self-check.md`](docs/conformance-self-check.md) maps
+  every [`docs/conformance-spec.md`](docs/conformance-spec.md) case to its tests.
+- **Reference connector:** [`docs/reference-connector.md`](docs/reference-connector.md)
+  — the CI-startable artifact the platform's integration tests run against.
 
 ## Packages
 
@@ -20,7 +24,7 @@ connector package; a reference connector lands next as a sibling package under
 |---|---|---|
 | [`@askdepth/audience-contract`](packages/contract) | v0.1.0 | zod schemas for the wire format, the AND-only criteria DSL, capability flags, the HMAC-SHA256 signing/verification helper, and version-negotiation logic. Imported by both the connector and the platform. Source published. |
 | [`@askdepth/audience-connector`](packages/connector) | v0.1.0 | the deployable connector: a Web-standard `Request → Response` handler, mandatory HMAC verification, the four endpoints, `postgres` + `rest` adapters, and Express/Fastify/Lambda shims. Zero runtime dependencies in core. |
-| reference connector | planned | a real connector over a seeded synthetic user base — CI fixture, demo, reference implementation. |
+| [`@askdepth/reference-connector`](packages/reference-connector) | internal | a real connector over a seeded synthetic user base — CI fixture, sales demo, reference implementation. Two variants (`postgres`, `rest`) over the same seed. Never published. See [`docs/reference-connector.md`](docs/reference-connector.md). |
 
 ## Runtimes
 

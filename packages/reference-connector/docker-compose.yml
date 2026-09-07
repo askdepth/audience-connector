@@ -1,0 +1,62 @@
+# One-command demo of the Askdepth reference connector (Postgres variant).
+#
+#   cd packages/reference-connector
+#   docker compose up
+#
+# Brings up:
+#   * `db`        — postgres:16, auto-loaded with the 5,000-row synthetic seed
+#                   (`seed/fixtures.sql` mounted into /docker-entrypoint-initdb.d).
+#   * `connector` — the reference connector built from this repo and served over
+#                   HTTP on :8787, signing with REFERENCE_SECRET.
+#
+# Then, from the host:
+#   node packages/connector/dist/bin/conformance.js conformance \
+#     --url http://localhost:8787/askdepth/v1 --secret demo-reference-secret \
+#     --unmapped-column internal_notes --unmapped-column crm_account_id \
+#     --filter-only-attribute country
+#
+# The secret here is a throwaway demo value. A real deployment injects its own.
+
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: reference_test
+    ports:
+      - '55432:5432'
+    volumes:
+      - ./seed/fixtures.sql:/docker-entrypoint-initdb.d/01-reference-seed.sql:ro
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres -d reference_test']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  connector:
+    image: node:22
+    working_dir: /repo
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      REFERENCE_SECRET: demo-reference-secret
+      DATABASE_URL: postgres://postgres:postgres@db:5432/reference_test
+      PORT: '8787'
+    ports:
+      - '8787:8787'
+    # Mount the whole repo read-write (a fresh install/build happens in-container
+    # so the demo needs nothing prepared on the host but Docker).
+    volumes:
+      - ../../:/repo
+    command:
+      - bash
+      - -euo
+      - pipefail
+      - -c
+      - |
+        corepack enable
+        pnpm install --frozen-lockfile
+        pnpm --recursive run build
+        exec pnpm --filter @askdepth/reference-connector start:postgres
