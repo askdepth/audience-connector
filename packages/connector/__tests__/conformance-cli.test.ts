@@ -128,10 +128,12 @@ describe('S1 conformance CLI', () => {
     stub = await startStubConnector(SECRET);
     const cap = capture();
 
-    const code = await main(['--url', stub.url, '--secret', SECRET, '--case', 'N1'], cap.io);
+    // `ZZ9` is in no stage's registry (N1/N2/N4/N8 are, as of S3).
+    const code = await main(['--url', stub.url, '--secret', SECRET, '--case', 'ZZ9'], cap.io);
 
     expect(code).toBe(2);
     expect(cap.err().toLowerCase()).toContain('unknown case');
+    expect(cap.err()).toContain('ZZ9');
   });
 
   it('--timeout-ms with a non-numeric value → exit 2', async () => {

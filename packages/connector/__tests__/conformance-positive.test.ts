@@ -27,10 +27,15 @@ const byId = (id: string): ConformanceCase => {
 
 const ALL_IDS = ['P1', 'P2', 'P3', 'P4', 'P5', 'P6', 'P7'] as const;
 
+// S3 wired the four wire-provable negative cases after the positives.
+const NEGATIVE_IDS = ['N1', 'N2', 'N4', 'N8'] as const;
+
 describe('S2 — registry shape', () => {
-  it('holds exactly P1–P7, in spec order, all kind:"positive"', () => {
-    expect(CONFORMANCE_CASES.map((c) => c.id)).toEqual([...ALL_IDS]);
-    expect(CONFORMANCE_CASES.every((c) => c.kind === 'positive')).toBe(true);
+  it('holds P1–P7 then N1,N2,N4,N8, in spec order, with matching kinds', () => {
+    expect(CONFORMANCE_CASES.map((c) => c.id)).toEqual([...ALL_IDS, ...NEGATIVE_IDS]);
+    const kind = Object.fromEntries(CONFORMANCE_CASES.map((c) => [c.id, c.kind]));
+    for (const id of ALL_IDS) expect(kind[id]).toBe('positive');
+    for (const id of NEGATIVE_IDS) expect(kind[id]).toBe('negative');
   });
 });
 
@@ -105,12 +110,12 @@ describe('S2 — case selection with a populated registry', () => {
     expect(summary.failed).toBe(0);
   });
 
-  it('runConformance with no filter runs all seven', async () => {
+  it('runConformance with no filter runs the whole registry (P1–P7 + N1,N2,N4,N8)', async () => {
     const summary = await runConformance(correctClient(), CONFORMANCE_CASES, {
       url: 'http://connector.fixture/askdepth/v1',
       timeoutMs: 5000,
     });
-    expect(summary.cases.map((c) => c.id)).toEqual([...ALL_IDS]);
+    expect(summary.cases.map((c) => c.id)).toEqual([...ALL_IDS, ...NEGATIVE_IDS]);
     expect(summary.failed).toBe(0);
   });
 });

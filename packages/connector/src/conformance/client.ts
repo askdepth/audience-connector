@@ -35,6 +35,14 @@ function corruptSignature(signature: string): string {
   return signature.slice(0, -1) + flipped;
 }
 
+/**
+ * How far in the past `postWithExpiredSignature` back-dates its timestamp.
+ * The contract's replay window is ±300s; 1000s is unambiguously outside it in
+ * either direction after clock skew, so `verify()` short-circuits to
+ * `reason: 'expired'` before it computes any HMAC.
+ */
+const EXPIRED_SIGNATURE_SKEW_SECONDS = 1000;
+
 function joinUrl(base: string, path: string): string {
   const b = base.endsWith('/') ? base.slice(0, -1) : base;
   const p = path.startsWith('/') ? path : `/${path}`;
@@ -71,8 +79,20 @@ export interface ConformanceClient {
   post(path: string, body: unknown): Promise<WireResponse>;
   /** GET with **no** signature or timestamp header at all. */
   getUnsigned(path: string): Promise<WireResponse>;
-  /** POST whose signature header is well-formed but does not verify. */
+  /** POST whose signature header is well-formed (`v1=<64 hex>`) but does not verify. */
   postWithBadSignature(path: string, body: unknown): Promise<WireResponse>;
+  /**
+   * POST whose signature is computed **correctly** over the body, but over a
+   * timestamp far outside the ±300s replay window — i.e. well-formed yet
+   * expired. Used by N2 alongside {@link postWithBadSignature}.
+   */
+  postWithExpiredSignature(path: string, body: unknown): Promise<WireResponse>;
+  /**
+   * A correctly-signed request with an arbitrary HTTP method. Used by N8 to
+   * fire `PUT`/`DELETE`/`PATCH` (and `POST`) at the connector; a body is sent —
+   * and signed — only when `body !== undefined` and the method carries one.
+   */
+  request(method: string, path: string, body?: unknown): Promise<WireResponse>;
 }
 
 export interface ConformanceClientOptions {
@@ -167,6 +187,29 @@ export function createConformanceClient(options: ConformanceClientOptions): Conf
         [SIGNATURE_HEADER]: corruptSignature(good),
       });
       return send('POST', path, headers, raw);
+    },
+
+    postWithExpiredSignature(path, body) {
+      const raw = JSON.stringify(body ?? {});
+      // Back-dated well past the replay window; the signature itself is valid
+      // for this (stale) timestamp.
+      const timestamp = Math.floor(now() / 1000) - EXPIRED_SIGNATURE_SKEW_SECONDS;
+      const signature = sign(signedBodyFor('POST', raw), timestamp, secretBuf);
+      const headers = new Headers({
+        'content-type': 'application/json',
+        [TIMESTAMP_HEADER]: String(timestamp),
+        [SIGNATURE_HEADER]: signature,
+      });
+      return send('POST', path, headers, raw);
+    },
+
+    request(method, path, body) {
+      const m = method.toUpperCase();
+      const carriesBody = body !== undefined && m !== 'GET' && m !== 'HEAD';
+      const raw = carriesBody ? JSON.stringify(body) : '';
+      const headers = new Headers(signatureHeaders(m, raw));
+      if (carriesBody) headers.set('content-type', 'application/json');
+      return send(m, path, headers, carriesBody ? raw : undefined);
     },
   };
 }

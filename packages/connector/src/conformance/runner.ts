@@ -1,6 +1,8 @@
-// Orchestration for a conformance run. S1 shipped an empty registry; S2 wires
+// Orchestration for a conformance run. S1 shipped an empty registry; S2 wired
 // the seven **positive** cases from `docs/conformance-spec.md` ("a connector
-// must pass, to activate"). Negative cases land in S3+.
+// must pass, to activate"). S3 adds the four **negative** cases that are
+// provable purely from the wire, with no data fixture — N1, N2, N4, N8 of the
+// "a connector fails if it…" list. N3/N5/N6/N7 land in S4.
 
 import type { ConformanceClient } from './client';
 import { healthCase } from './cases/positive/health';
@@ -10,6 +12,10 @@ import { searchCase } from './cases/positive/search';
 import { externalIdInCase } from './cases/positive/external-id-in';
 import { attributeFiltersCase } from './cases/positive/attribute-filters';
 import { suppressExternalIdsCase } from './cases/positive/suppress-external-ids';
+import { unsignedAcceptedCase } from './cases/negative/unsigned-accepted';
+import { badSignatureAcceptedCase } from './cases/negative/bad-signature-accepted';
+import { errorLeaksDataCase } from './cases/negative/error-leaks-data';
+import { writePathExposedCase } from './cases/negative/write-path-exposed';
 
 export interface ConformanceCase {
   id: string;
@@ -24,9 +30,11 @@ export interface CaseResult {
 }
 
 /**
- * The registry, in `docs/conformance-spec.md` positive-list order (P1–P7).
- * Every case here has both a "correct connector passes" and a
- * "subtly-wrong connector fails" test in `__tests__/conformance-positive.test.ts`.
+ * The registry, in `docs/conformance-spec.md` order: the positive list first
+ * (P1–P7), then the wire-provable negative cases (N1, N2, N4, N8). Every case
+ * has both a "correct connector passes" and a "deliberately-broken fixture
+ * fails" test — positives in `__tests__/conformance-positive.test.ts`,
+ * negatives in `__tests__/conformance-negative.test.ts`.
  */
 export const CONFORMANCE_CASES: readonly ConformanceCase[] = Object.freeze([
   healthCase,
@@ -36,6 +44,10 @@ export const CONFORMANCE_CASES: readonly ConformanceCase[] = Object.freeze([
   externalIdInCase,
   attributeFiltersCase,
   suppressExternalIdsCase,
+  unsignedAcceptedCase,
+  badSignatureAcceptedCase,
+  errorLeaksDataCase,
+  writePathExposedCase,
 ]);
 
 export interface RunSummary {
