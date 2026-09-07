@@ -25,12 +25,198 @@ import {
 } from '../src/conformance/runner';
 import { main, parseArgs } from '../src/bin/conformance';
 import { startStubConnector, type StubConnector } from './_conformance-stub';
+import { verify } from '@askdepth/audience-contract';
+import { createConnector } from '../src/index';
+import type { Adapter, CanonicalRow } from '../src/types';
+import { createConformanceClient, type ConformanceClient } from '../src/conformance/client';
+import { memAdapter, type MemRow } from './_mem-adapter';
 import {
   bigCorrectClient,
   bigBrokenClient,
   bigRowCapClient,
+  bigSyntheticUsers,
+  BIGBASE_SECRET,
+  BIG_FIELD_MAPPING,
+  BIG_ATTRIBUTES,
+  BIG_COLUMNS,
   UNMAPPED_COLUMNS,
 } from './_conformance-bigbase';
+
+const BIGBASE_URL = 'http://bigbase.fixture/askdepth/v1';
+
+/** A `ConformanceClient` wired straight into an in-process `createConnector`. */
+function seam(config: Parameters<typeof createConnector>[0]): ConformanceClient {
+  const connector = createConnector(config);
+  const fetchImpl: typeof fetch = async (input, init) =>
+    connector.fetch(new Request(String(input), init as RequestInit));
+  return createConformanceClient({ url: BIGBASE_URL, secret: BIGBASE_SECRET, fetchImpl });
+}
+
+// ── D-3: a store column nested inside `row.attributes` ─────────────────────
+// The adapter injects `attributes: { internal_notes: <value> }` — a real store
+// column — onto every search row, and the connector's `/schema` lists
+// `internal_notes` (a genuine full-store introspection). `internal_notes` is
+// NOT a filterable attribute, so N3's `attr.*` disambiguation probe rejects it
+// and the nested key is flagged.
+function nestedAttrLeakClient(): ConformanceClient {
+  const source = bigSyntheticUsers();
+  const columns = [...BIG_COLUMNS, { name: 'internal_notes', type: 'text' }];
+  const base = memAdapter(source, { columns });
+  const notesById = new Map(source.map((r) => [r.externalId, (r as MemRow).internal_notes]));
+  const adapter: Adapter = {
+    ...base,
+    async search(plan, ctx) {
+      const real = await base.search(plan, ctx);
+      return {
+        ...real,
+        rows: real.rows.map((row) => ({
+          ...row,
+          attributes: {
+            ...(row.attributes ?? {}),
+            internal_notes: notesById.get(row.externalId) ?? 'NOTE',
+          },
+        })) as CanonicalRow[],
+      };
+    },
+  };
+  return seam({
+    secret: BIGBASE_SECRET,
+    adapter,
+    fieldMapping: BIG_FIELD_MAPPING,
+    attributes: BIG_ATTRIBUTES,
+  });
+}
+
+// ── D-4: a correct randomSample connector that does NOT map `signupAt` ─────
+const NO_SIGNUP_MAPPING = {
+  externalId: 'user_id',
+  email: 'email_addr',
+  name: 'full_name',
+  segment: 'segment',
+  isActive: 'is_active',
+} as const;
+
+function noSignupCorrectClient(): ConformanceClient {
+  return seam({
+    secret: BIGBASE_SECRET,
+    adapter: memAdapter(bigSyntheticUsers(), { columns: BIG_COLUMNS }),
+    fieldMapping: NO_SIGNUP_MAPPING,
+    attributes: BIG_ATTRIBUTES,
+  });
+}
+
+/** D-4: an oldest-N fake sampler that also does not map `signupAt` — must
+ *  still fail N7 through the insertion-order fallback. */
+function noSignupOldestSampleClient(): ConformanceClient {
+  const source = bigSyntheticUsers();
+  const base = memAdapter(source, { columns: BIG_COLUMNS });
+  const adapter: Adapter = {
+    ...base,
+    async search(plan, ctx) {
+      if (!plan.sample) return base.search(plan, ctx);
+      const size = plan.sample.size;
+      const rows = source
+        .slice(0, size)
+        .map((r) => ({ externalId: r.externalId, email: r.email }) as CanonicalRow);
+      return { rows, nextCursor: undefined };
+    },
+  };
+  return seam({
+    secret: BIGBASE_SECRET,
+    adapter,
+    fieldMapping: NO_SIGNUP_MAPPING,
+    attributes: BIG_ATTRIBUTES,
+  });
+}
+
+// ── D-5: a sampler that returns the SAME subset on every pull ──────────────
+function fixedSubsetSampleClient(): ConformanceClient {
+  const source = bigSyntheticUsers();
+  const base = memAdapter(source, { columns: BIG_COLUMNS });
+  // A deterministic pseudo-random 400 — spread across the timeline (so it
+  // clears the percentile band) but IDENTICAL on every draw.
+  const fixed = [...source]
+    .map((r, i) => ({ r, k: (i * 2654435761) % source.length }))
+    .sort((a, b) => a.k - b.k)
+    .slice(0, 400)
+    .map(({ r }) => r);
+  const adapter: Adapter = {
+    ...base,
+    async search(plan, ctx) {
+      if (!plan.sample) return base.search(plan, ctx);
+      const size = plan.sample.size;
+      const rows = fixed
+        .slice(0, size)
+        .map((r) => ({ externalId: r.externalId, email: r.email, signupAt: r.signupAt }) as CanonicalRow);
+      return { rows, nextCursor: undefined };
+    },
+  };
+  return seam({
+    secret: BIGBASE_SECRET,
+    adapter,
+    fieldMapping: BIG_FIELD_MAPPING,
+    attributes: BIG_ATTRIBUTES,
+  });
+}
+
+// ── N6: a connector that drops the row cap ONLY when criteria is non-empty ──
+function filteredOnlyRowCapClient(): ConformanceClient {
+  const secret = Buffer.from(BIGBASE_SECRET, 'utf8');
+  const delegate = createConnector({
+    secret: BIGBASE_SECRET,
+    adapter: memAdapter(bigSyntheticUsers(), { columns: BIG_COLUMNS }),
+    fieldMapping: BIG_FIELD_MAPPING,
+    attributes: BIG_ATTRIBUTES,
+  });
+  const j = { 'content-type': 'application/json' };
+  const overCap = Array.from({ length: 1500 }, (_, i) => ({
+    externalId: `fcap-${String(i).padStart(4, '0')}`,
+    email: `fcap${i}@synthetic.example`,
+  }));
+  const fetchImpl: typeof fetch = async (input, init) => {
+    const req = new Request(String(input), init as RequestInit);
+    const url = new URL(req.url);
+    const method = req.method.toUpperCase();
+    const raw = method === 'GET' || method === 'HEAD' ? '' : await req.clone().text();
+    const ts = req.headers.get('x-askdepth-timestamp') ?? '';
+    const sig = req.headers.get('x-askdepth-signature') ?? '';
+    if (!verify(raw, ts, sig, secret).valid) {
+      return new Response(
+        JSON.stringify({ error: { code: 'unauthorized', message: 'Request is not authorized.' } }),
+        { status: 401, headers: j },
+      );
+    }
+    if (url.pathname.endsWith('/candidates/search') && method === 'POST') {
+      let body: { limit?: unknown; cursor?: unknown; sample?: unknown; criteria?: { all?: unknown } } = {};
+      try {
+        body = JSON.parse(raw);
+      } catch {
+        /* delegate */
+      }
+      const all = body.criteria?.all;
+      const nonEmpty = Array.isArray(all) && all.length > 0;
+      if (
+        typeof body.limit === 'number' &&
+        Number.isInteger(body.limit) &&
+        body.limit > 1000
+      ) {
+        return new Response(
+          JSON.stringify({ error: { code: 'limit_exceeded', message: 'Request exceeds an allowed limit.' } }),
+          { status: 400, headers: j },
+        );
+      }
+      if (body.limit === 1000 && body.cursor === undefined && body.sample === undefined && nonEmpty) {
+        // THE VIOLATION: the cap is dropped once a WHERE clause is present.
+        return new Response(JSON.stringify({ rows: overCap, nextCursor: undefined }), {
+          status: 200,
+          headers: j,
+        });
+      }
+    }
+    return delegate.fetch(new Request(String(input), init as RequestInit));
+  };
+  return createConformanceClient({ url: BIGBASE_URL, secret: BIGBASE_SECRET, fetchImpl });
+}
 
 const byId = (id: string): ConformanceCase => {
   const c = CONFORMANCE_CASES.find((x) => x.id === id);
@@ -283,5 +469,102 @@ describe('S4 — CLI wiring', () => {
     );
     expect(code).toBe(2);
     expect(err.join('').toLowerCase()).toContain('unknown case');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Security-review coverage gaps: D-3, D-4, D-5, N5-filtered, N6-filtered
+// ---------------------------------------------------------------------------
+
+describe('S4 — D-3: N3 descends into row.attributes', () => {
+  it('a store column nested in row.attributes → fail, names it (WITH the out-of-band list)', async () => {
+    const r = await byId('N3').run(nestedAttrLeakClient(), WITH_UNMAPPED);
+    expect(r).toMatchObject({ id: 'N3', pass: false });
+    expect(r.detail).toContain('internal_notes');
+  });
+
+  it('the same nested leak is caught with NO out-of-band list (structural attr.* probe)', async () => {
+    const r = await byId('N3').run(nestedAttrLeakClient(), NO_CONTEXT);
+    expect(r).toMatchObject({ id: 'N3', pass: false });
+    expect(r.detail).toContain('internal_notes');
+    expect(r.detail).toMatch(/attributes/);
+  });
+
+  it('the correct connector (real attr.tier display) still passes N3', async () => {
+    const r = await byId('N3').run(bigCorrectClient(), WITH_UNMAPPED);
+    expect(r, JSON.stringify(r)).toMatchObject({ id: 'N3', pass: true });
+  });
+});
+
+describe('S4 — D-4: N7 works without a signupAt mapping', () => {
+  it('a correct randomSample connector with NO signupAt mapping → N7 pass via the fallback', async () => {
+    pinPullSeeds();
+    const r = await byId('N7').run(noSignupCorrectClient());
+    expect(r, JSON.stringify(r)).toMatchObject({ id: 'N7', pass: true });
+    expect(r.detail).toMatch(/insertion-order mode/);
+  });
+
+  it('an oldest-N fake with NO signupAt mapping still fails N7 in fallback mode', async () => {
+    pinPullSeeds();
+    const r = await byId('N7').run(noSignupOldestSampleClient());
+    expect(r).toMatchObject({ id: 'N7', pass: false });
+    expect(r.detail?.toLowerCase()).toMatch(/oldest|percentile|band/);
+  });
+
+  it('the signupAt-mapping reference connector still runs N7 in signupAt mode', async () => {
+    pinPullSeeds();
+    const r = await byId('N7').run(bigCorrectClient());
+    expect(r, JSON.stringify(r)).toMatchObject({ id: 'N7', pass: true });
+    expect(r.detail).toMatch(/signupAt mode/);
+  });
+});
+
+describe('S4 — D-5: N7 checks the draws differ from each other', () => {
+  it('a sampler that returns the SAME 400 ids on every pull → N7 pass:false on the diversity check', async () => {
+    pinPullSeeds();
+    const r = await byId('N7').run(fixedSubsetSampleClient());
+    expect(r).toMatchObject({ id: 'N7', pass: false });
+    expect(r.detail?.toLowerCase()).toMatch(/jaccard|identical/);
+  });
+
+  it('the correct connector (independent draws) still passes the diversity check', async () => {
+    pinPullSeeds();
+    const r = await byId('N7').run(bigCorrectClient());
+    expect(r, JSON.stringify(r)).toMatchObject({ id: 'N7', pass: true });
+    expect(r.detail).toMatch(/Jaccard/);
+  });
+});
+
+describe('S4 — N5: the filtered pass', () => {
+  it('the nondeterministic-cursor bug still fails N5', async () => {
+    const r = await byId('N5').run(bigBrokenClient('randomPageOrder'));
+    expect(r).toMatchObject({ id: 'N5', pass: false });
+  });
+
+  it('the correct connector passes both the unfiltered and the externalId IN pass', async () => {
+    const r = await byId('N5').run(bigCorrectClient());
+    expect(r, JSON.stringify(r)).toMatchObject({ id: 'N5', pass: true });
+    expect(r.detail).toMatch(/externalId IN/);
+  });
+});
+
+describe('S4 — N6: the filtered pass', () => {
+  it('a connector that drops the cap ONLY when criteria is non-empty → N6 pass:false', async () => {
+    const r = await byId('N6').run(filteredOnlyRowCapClient());
+    expect(r).toMatchObject({ id: 'N6', pass: false });
+    expect(r.detail).toMatch(/filtered/);
+    expect(r.detail).toMatch(/1500/);
+  });
+
+  it('the correct connector passes the unfiltered and the filtered cap check', async () => {
+    const r = await byId('N6').run(bigCorrectClient());
+    expect(r, JSON.stringify(r)).toMatchObject({ id: 'N6', pass: true });
+    expect(r.detail).toMatch(/filtered \(isActive/);
+  });
+
+  it('the plain over-cap fixture still fails N6 on the unfiltered leg', async () => {
+    const r = await byId('N6').run(bigRowCapClient());
+    expect(r).toMatchObject({ id: 'N6', pass: false });
+    expect(r.detail).toMatch(/1500/);
   });
 });

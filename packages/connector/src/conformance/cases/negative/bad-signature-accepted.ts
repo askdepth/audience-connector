@@ -6,11 +6,17 @@
 // │ of bad request against each input endpoint:                            │
 // │   1. a byte-wrong signature — well-formed `v1=<64 hex>`, does not       │
 // │      verify (`postWithBadSignature`);                                   │
-// │   2. a signature computed CORRECTLY over the body, but over a timestamp │
-// │      ~1000s in the past — well-formed yet outside the ±300s replay      │
-// │      window, i.e. "expired" (`postWithExpiredSignature`).              │
-// │ Both must come back as a 401 in the documented error envelope. Anything │
-// │ else means the connector *answered* a badly-signed caller → FAIL.      │
+// │   2. signatures computed CORRECTLY over the body, but over a timestamp  │
+// │      outside the ±300s replay window — well-formed yet "expired".       │
+// │      Probed at THREE skews: ~330s in the past (just outside the         │
+// │      window), ~1000s in the past (well outside), and ~330s in the       │
+// │      future (`postWithSkewedSignature`). The ~330s probes exercise the  │
+// │      boundary: a connector with a lax window (say ±600s) rejects the    │
+// │      1000s probe yet accepts a 330s-stale replay, and would otherwise   │
+// │      pass N2 while being non-conformant.                               │
+// │ Every probe must come back as a 401 in the documented error envelope.  │
+// │ Anything else means the connector *answered* a badly-signed caller →   │
+// │ FAIL, with a `detail` naming which probe it answered.                  │
 // └───────────────────────────────────────────────────────────────────────┘
 
 import type { ConformanceCase } from '../../runner';
@@ -20,6 +26,16 @@ import { isDocumented401, excerpt } from './_shared';
 // gate, before the body is parsed or the route is chosen.
 const PROBE_BODY = { criteria: { all: [] }, mapping: {} };
 const PROBE_PATHS = ['/candidates/count', '/candidates/search'];
+
+// The contract's replay window is ±300s (verify-request.ts). `skew` is the
+// number of seconds SUBTRACTED from `now` when the signature is minted:
+// positive → timestamp in the past, negative → timestamp in the future. The
+// ±330s probes sit just outside the window; 1000s is far outside it.
+const SKEW_PROBES: ReadonlyArray<{ skew: number; label: string }> = [
+  { skew: 330, label: 'timestamped ~330s in the past (just outside the +300s replay window)' },
+  { skew: 1000, label: 'timestamped ~1000s in the past (well outside the replay window)' },
+  { skew: -330, label: 'timestamped ~330s in the future (just outside the -300s replay window)' },
+];
 
 export const badSignatureAcceptedCase: ConformanceCase = {
   id: 'N2',
@@ -36,14 +52,16 @@ export const badSignatureAcceptedCase: ConformanceCase = {
         };
       }
 
-      const expired = await client.postWithExpiredSignature(path, PROBE_BODY);
-      const c2 = isDocumented401(expired);
-      if (!c2.ok) {
-        return {
-          id: 'N2',
-          pass: false,
-          detail: `connector answered POST ${path} carrying a well-formed but expired (out-of-window) signature: ${c2.reason}; body was "${excerpt(expired.bodyText)}"`,
-        };
+      for (const { skew, label } of SKEW_PROBES) {
+        const res = await client.postWithSkewedSignature(path, PROBE_BODY, skew);
+        const check = isDocumented401(res);
+        if (!check.ok) {
+          return {
+            id: 'N2',
+            pass: false,
+            detail: `connector answered POST ${path} carrying a well-formed signature ${label}: ${check.reason}; body was "${excerpt(res.bodyText)}"`,
+          };
+        }
       }
     }
     return { id: 'N2', pass: true };

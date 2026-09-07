@@ -20,9 +20,13 @@
 //   * **Structural (always).** Every key of every `/candidates/search` row must
 //     be a canonical field, or — for a connector whose row keys mirror its
 //     store column names — present in the connector's own `/schema` `columns`.
-//     Anything else is flagged, naming the key. This is the weaker check: a
-//     connector that over-returns a store column it *also* lists in `/schema`
-//     slips through, which is why the out-of-band list exists.
+//     Anything else is flagged, naming the key. The same check descends into
+//     `row.attributes`: a key there that collides with a `/schema` column name
+//     (a raw store column dumped under `attributes`) or was named via
+//     `--unmapped-column` is flagged too; a nested key that is neither is
+//     taken to be a legitimately-mapped display attribute. This is the weaker
+//     check: a connector that over-returns a store column it *also* lists in
+//     `/schema` slips through, which is why the out-of-band list exists.
 //
 //   * **Declared (when `--unmapped-column <name>` was given).** The operator
 //     has named store columns that exist in the backing data but are
@@ -161,11 +165,50 @@ async function countProbe(
   return { ok: true, res };
 }
 
+/**
+ * A key that appears BOTH under `row.attributes` AND in `/schema` `columns` is
+ * ambiguous: it could be a raw store column dumped by `SELECT *`, or a
+ * legitimately-mapped display attribute whose name merely coincides with a
+ * declared column (the reference connector's hand-declared REST schema lists
+ * its attribute-backing columns). The wire exposes no "returnable attributes"
+ * list, but a returnable display attribute must also be **filterable** (the
+ * handler enforces `returnable ⊆ filterable`). So probe with an `attr.<key>`
+ * filter: if the connector accepts it, `<key>` is a declared attribute — not a
+ * leak; if it rejects it as `malformed_request`, `<key>` is not filterable and
+ * its presence under `attributes` is an unmapped store column that leaked.
+ * `{ decided: false }` when the answer is inconclusive (e.g. the connector
+ * advertises no attribute filtering at all) — the case then does not flag it.
+ */
+async function isDeclaredFilterableAttr(
+  client: ConformanceClient,
+  key: string,
+  sampleValue: unknown,
+): Promise<{ decided: true; legit: boolean } | { decided: false }> {
+  const value =
+    typeof sampleValue === 'string' ||
+    typeof sampleValue === 'number' ||
+    typeof sampleValue === 'boolean'
+      ? sampleValue
+      : '__conformance_probe__';
+  const res = await client.post('/candidates/count', {
+    criteria: { all: [{ field: `attr.${key}`, op: 'eq', value }] },
+    mapping: {},
+  });
+  if (res.status === 200) return { decided: true, legit: true };
+  if (isMalformedRejection(res)) return { decided: true, legit: false };
+  return { decided: false };
+}
+
 export const unmappedColumnsLeakedCase: ConformanceCase = {
   id: 'N3',
   kind: 'negative',
   async run(client, context) {
     const declared = [...(context?.unmappedColumns ?? [])];
+    // `attr.<key>` acceptance is a per-connector fact — probe each key once.
+    const attrProbeCache = new Map<
+      string,
+      { decided: true; legit: boolean } | { decided: false }
+    >();
 
     // `/schema` is fetched only to seed the structural row-key check below.
     // A declared-unmapped name appearing in `/schema` `columns` is legitimate
@@ -222,11 +265,45 @@ export const unmappedColumnsLeakedCase: ConformanceCase = {
         }
       }
 
-      // 3. Structural: no foreign top-level key on any row.
+      // 3. Structural: no foreign top-level key on any row, and no raw store
+      //    column dumped INSIDE `row.attributes`.
       for (const [idx, row] of rows.entries()) {
         if (typeof row !== 'object' || row === null) {
           return fail(`${label}: row ${idx} is not an object: ${JSON.stringify(row).slice(0, 120)}`);
         }
+
+        // 3a. Descend into `row.attributes`. A connector that answers
+        //     `SELECT *` under `attributes: { ssn: …, internal_notes: … }`
+        //     would not be caught by the top-level key check. A nested key is
+        //     flagged when it was named via `--unmapped-column`, or when it
+        //     collides with a `/schema` column name AND the connector does not
+        //     accept it as an `attr.*` filter (see
+        //     {@link isDeclaredFilterableAttr}). A nested key that is neither is
+        //     taken to be a legitimately-mapped display attribute — structurally
+        //     we cannot prove otherwise, and the declared-list `bodyText`
+        //     backstop above still catches a renamed leak.
+        const attrs = (row as { attributes?: unknown }).attributes;
+        if (attrs !== null && typeof attrs === 'object' && !Array.isArray(attrs)) {
+          for (const [key, value] of Object.entries(attrs as Record<string, unknown>)) {
+            if (declared.includes(key)) {
+              return fail(
+                `${label}: row ${idx} ("${String(row.externalId)}") nests the declared unmapped column "${key}" inside row.attributes — a mapped, capped projection must never expose it`,
+              );
+            }
+            if (!schemaCols.has(key)) continue; // presumed a mapped display attribute
+            let verdict = attrProbeCache.get(key);
+            if (verdict === undefined) {
+              verdict = await isDeclaredFilterableAttr(client, key, value);
+              attrProbeCache.set(key, verdict);
+            }
+            if (verdict.decided && !verdict.legit) {
+              return fail(
+                `${label}: row ${idx} ("${String(row.externalId)}") nests "${key}" inside row.attributes — a /schema store column the connector does not expose as a filterable attribute, i.e. an unmapped column leaked (SELECT * under attributes?)`,
+              );
+            }
+          }
+        }
+
         for (const key of Object.keys(row)) {
           if (CANONICAL_ROW_KEYS.has(key)) continue;
           if (schemaCols.has(key)) {

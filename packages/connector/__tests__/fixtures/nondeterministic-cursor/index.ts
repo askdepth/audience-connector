@@ -36,6 +36,14 @@ export function createNondeterministicCursorClient(): ConformanceClient {
         return base.search(plan, ctx);
       }
 
+      // A `sample` pull is delegated verbatim — a genuine per-pull random
+      // subsample. The violation here is cursor pagination only; without this
+      // the fixed re-order key would also make every `sample` draw identical
+      // and trip N7's draw-to-draw diversity check (D-5).
+      if (plan.sample) {
+        return base.search(plan, ctx);
+      }
+
       // Borrow the reference page only for its has-more signal / cursor token.
       const real = await base.search(plan, ctx);
 

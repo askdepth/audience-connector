@@ -16,6 +16,13 @@
 //      over 1,000 (the pages may sum past 1,000 — that is expected; a single
 //      over-cap *response* is the violation).
 //
+// Check 2 is run over the unfiltered "everyone" query AND over a structurally
+// filtered query (an `isActive` clause — either polarity — that the connector
+// maps): a connector that appends `LIMIT 1000` on a full scan but omits it
+// once a `WHERE` is present would pass an unfiltered-only check. If the
+// connector maps no usable structural filter, the filtered leg is skipped with
+// a note rather than failing.
+//
 // `detail` names the failing check and the observed count or code.
 
 import type { ConformanceCase } from '../../runner';
@@ -26,6 +33,16 @@ const CAP = 1000;
 const OVER_CAP = 1001;
 const MAX_PAGES = 200;
 
+type Criteria = Record<string, unknown>;
+const ALL: Criteria = { all: [] };
+
+// Structurally-filtered queries that need no prior knowledge of the data.
+// Tried in order; the first that returns HTTP 200 with >= 1 row is used.
+const FILTER_CANDIDATES: ReadonlyArray<{ label: string; criteria: Criteria }> = [
+  { label: 'isActive == true', criteria: { all: [{ field: 'isActive', op: 'eq', value: true }] } },
+  { label: 'isActive == false', criteria: { all: [{ field: 'isActive', op: 'eq', value: false }] } },
+];
+
 function fail(detail: string) {
   return { id: 'N6', pass: false, detail } as const;
 }
@@ -33,12 +50,13 @@ function fail(detail: string) {
 async function search(
   client: ConformanceClient,
   limit: number,
-  cursor?: string,
+  cursor: string | undefined,
+  criteria: Criteria,
 ): Promise<
   | { ok: true; status: number; rows: unknown[]; nextCursor?: string; code?: string }
   | { ok: false; detail: string }
 > {
-  const body: Record<string, unknown> = { criteria: { all: [] }, mapping: MAPPING, limit };
+  const body: Record<string, unknown> = { criteria, mapping: MAPPING, limit };
   if (cursor !== undefined) body.cursor = cursor;
   const res = await client.post('/candidates/search', body);
 
@@ -61,12 +79,52 @@ async function search(
   };
 }
 
+/** Check 2 for one query: the at-cap response and every page must be <= CAP. */
+async function capHoldsFor(
+  client: ConformanceClient,
+  criteria: Criteria,
+  label: string,
+): Promise<{ ok: true; maxPage: number; total: number } | { ok: false; detail: string }> {
+  const atCap = await search(client, CAP, undefined, criteria);
+  if (!atCap.ok) return { ok: false, detail: atCap.detail };
+  if (atCap.status !== 200) {
+    return { ok: false, detail: `${label}, limit ${CAP}: expected HTTP 200, observed HTTP ${atCap.status}` };
+  }
+  if (atCap.rows.length > CAP) {
+    return {
+      ok: false,
+      detail: `${label}, limit ${CAP}: a single response returned ${atCap.rows.length} rows — the ${CAP}-row cap was exceeded`,
+    };
+  }
+
+  let cursor = atCap.nextCursor;
+  let total = atCap.rows.length;
+  let maxPage = atCap.rows.length;
+  for (let pages = 1; cursor && pages <= MAX_PAGES; pages++) {
+    const next = await search(client, CAP, cursor, criteria);
+    if (!next.ok) return { ok: false, detail: next.detail };
+    if (next.status !== 200) {
+      return { ok: false, detail: `${label}, limit ${CAP} page ${pages + 1}: expected HTTP 200, observed HTTP ${next.status}` };
+    }
+    if (next.rows.length > CAP) {
+      return {
+        ok: false,
+        detail: `${label}, limit ${CAP} page ${pages + 1}: response returned ${next.rows.length} rows — the ${CAP}-row cap was exceeded`,
+      };
+    }
+    total += next.rows.length;
+    maxPage = Math.max(maxPage, next.rows.length);
+    cursor = next.nextCursor;
+  }
+  return { ok: true, maxPage, total };
+}
+
 export const rowCapExceededCase: ConformanceCase = {
   id: 'N6',
   kind: 'negative',
   async run(client) {
     // 1. limit over the cap → documented rejection, adapter untouched.
-    const over = await search(client, OVER_CAP);
+    const over = await search(client, OVER_CAP, undefined, ALL);
     if (!over.ok) return fail(over.detail);
     if (over.status !== 400) {
       return fail(
@@ -80,42 +138,28 @@ export const rowCapExceededCase: ConformanceCase = {
       );
     }
 
-    // 2. A single at-cap request must not exceed the cap.
-    const atCap = await search(client, CAP);
-    if (!atCap.ok) return fail(atCap.detail);
-    if (atCap.status !== 200) {
-      return fail(`limit ${CAP}: expected HTTP 200, observed HTTP ${atCap.status}`);
-    }
-    if (atCap.rows.length > CAP) {
-      return fail(
-        `limit ${CAP}: a single response returned ${atCap.rows.length} rows — the ${CAP}-row cap was exceeded`,
-      );
-    }
+    // 2a. The cap holds on the unfiltered "everyone" query.
+    const unfiltered = await capHoldsFor(client, ALL, 'unfiltered');
+    if (!unfiltered.ok) return fail(unfiltered.detail);
 
-    // 3. Paging hard at the cap — no individual page may exceed it.
-    let cursor = atCap.nextCursor;
-    let total = atCap.rows.length;
-    let maxPage = atCap.rows.length;
-    for (let pages = 1; cursor && pages <= MAX_PAGES; pages++) {
-      const next = await search(client, CAP, cursor);
-      if (!next.ok) return fail(next.detail);
-      if (next.status !== 200) {
-        return fail(`limit ${CAP} page ${pages + 1}: expected HTTP 200, observed HTTP ${next.status}`);
-      }
-      if (next.rows.length > CAP) {
-        return fail(
-          `limit ${CAP} page ${pages + 1}: response returned ${next.rows.length} rows — the ${CAP}-row cap was exceeded`,
-        );
-      }
-      total += next.rows.length;
-      maxPage = Math.max(maxPage, next.rows.length);
-      cursor = next.nextCursor;
+    // 2b. The cap also holds under a structural `WHERE` clause.
+    let filteredNote = 'no mappable structural filter — filtered cap leg skipped';
+    for (const cand of FILTER_CANDIDATES) {
+      const probe = await search(client, CAP, undefined, cand.criteria);
+      if (!probe.ok) return fail(probe.detail);
+      if (probe.status !== 200 || probe.rows.length === 0) continue; // filter not usable
+      const held = await capHoldsFor(client, cand.criteria, `filtered (${cand.label})`);
+      if (!held.ok) return fail(held.detail);
+      filteredNote = `filtered (${cand.label}): largest single response ${held.maxPage} row(s), ${held.total} across pages`;
+      break;
     }
 
     return {
       id: 'N6',
       pass: true,
-      detail: `limit ${OVER_CAP} rejected as limit_exceeded; largest single response ${maxPage} row(s), ${total} row(s) total across pages — the ${CAP}-row cap held`,
+      detail:
+        `limit ${OVER_CAP} rejected as limit_exceeded; unfiltered: largest single response ` +
+        `${unfiltered.maxPage} row(s), ${unfiltered.total} across pages; ${filteredNote} — the ${CAP}-row cap held`,
     };
   },
 };

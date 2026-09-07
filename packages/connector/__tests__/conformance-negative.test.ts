@@ -149,6 +149,80 @@ function writePathClient(): ConformanceClient {
   return createConformanceClient({ url: BASE_URL, secret: FIXTURE_SECRET, fetchImpl });
 }
 
+/**
+ * D-1 violation: signature IS enforced on GET, but an UNSIGNED POST to the
+ * data endpoints is served anyway (the connector's auth middleware gates GET
+ * routes only). A request that already carries signature headers is passed
+ * through untouched, so the real gate still rejects a bad/expired signature —
+ * only the "unauthenticated data access" half of N1 gets through.
+ */
+function getOnlyAuthClient(): ConformanceClient {
+  const connector = refConnector();
+  const fetchImpl: typeof fetch = async (input, init) => {
+    const src = new Request(String(input), init as RequestInit);
+    const method = src.method.toUpperCase();
+    const url = new URL(src.url);
+    const isDataPost =
+      method === 'POST' &&
+      (url.pathname.endsWith('/candidates/count') || url.pathname.endsWith('/candidates/search'));
+    const hasSig =
+      src.headers.has('x-askdepth-signature') && src.headers.has('x-askdepth-timestamp');
+    if (isDataPost && !hasSig) {
+      // THE VIOLATION: mint a signature for the unsigned data request.
+      const raw = await src.clone().text();
+      const ts = Math.floor(Date.now() / 1000);
+      const headers = new Headers(src.headers);
+      headers.set('x-askdepth-timestamp', String(ts));
+      headers.set('x-askdepth-signature', sign(raw, ts, secretBuf()));
+      return connector.fetch(new Request(src.url, { method, headers, body: raw }));
+    }
+    return connector.fetch(new Request(String(input), init as RequestInit));
+  };
+  return createConformanceClient({ url: BASE_URL, secret: FIXTURE_SECRET, fetchImpl });
+}
+
+/**
+ * D-2 violation: signature verification is present, but the replay window is
+ * ±600s instead of the contract's ±300s. A request inside the lax window is
+ * re-signed fresh and handed to a genuine connector; an unsigned request is
+ * still refused, so only the "expired signature accepted" half of N2 gets
+ * through — and only at the ~330s boundary, not at 1000s.
+ */
+function laxWindowClient(): ConformanceClient {
+  const connector = refConnector();
+  const secret = secretBuf();
+  const LAX_WINDOW = 600;
+  const j = { 'content-type': 'application/json' };
+  const deny = (code: string) =>
+    new Response(JSON.stringify({ error: { code, message: 'Request is not authorized.' } }), {
+      status: 401,
+      headers: j,
+    });
+  const fetchImpl: typeof fetch = async (input, init) => {
+    const src = new Request(String(input), init as RequestInit);
+    const method = src.method.toUpperCase();
+    const hasBody = method !== 'GET' && method !== 'HEAD';
+    const raw = hasBody ? await src.clone().text() : '';
+    const signed = hasBody ? raw : '';
+    const sig = src.headers.get('x-askdepth-signature') ?? '';
+    const tsHeader = src.headers.get('x-askdepth-timestamp') ?? '';
+    if (!sig || !tsHeader) return deny('unauthorized');
+    const ts = Number(tsHeader);
+    if (!Number.isFinite(ts)) return deny('invalid_signature');
+    // THE VIOLATION: ±600s, not ±300s.
+    if (Math.abs(Math.floor(Date.now() / 1000) - ts) > LAX_WINDOW) return deny('expired_timestamp');
+    if (sign(signed, ts, secret) !== sig) return deny('invalid_signature');
+    const freshTs = Math.floor(Date.now() / 1000);
+    const headers = new Headers(src.headers);
+    headers.set('x-askdepth-timestamp', String(freshTs));
+    headers.set('x-askdepth-signature', sign(signed, freshTs, secret));
+    return connector.fetch(
+      new Request(src.url, { method, headers, body: hasBody ? raw : undefined }),
+    );
+  };
+  return createConformanceClient({ url: BASE_URL, secret: FIXTURE_SECRET, fetchImpl });
+}
+
 // ---------------------------------------------------------------------------
 // 1. a correct connector passes every negative case
 // ---------------------------------------------------------------------------
@@ -204,6 +278,42 @@ describe('S3 — N2 catches a connector that does not enforce the signature', ()
     const result = await byId('N2').run(unsignedAcceptingClient());
     expect(result).toMatchObject({ id: 'N2', pass: false });
     expect(result.detail ?? '').toMatch(/signature/i);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// D-1 / D-2 — coverage gaps closed by security review
+// ---------------------------------------------------------------------------
+
+describe('S3 — D-1: N1 probes unsigned POST to the data endpoints', () => {
+  it('a connector that authenticates GET but serves unsigned POST /candidates/* → N1 pass:false naming the POST path', async () => {
+    const result = await byId('N1').run(getOnlyAuthClient());
+    expect(result).toMatchObject({ id: 'N1', pass: false });
+    expect(result.detail ?? '').toMatch(/unsigned POST \/candidates\/(count|search)/);
+  });
+
+  it('that same fixture still passes N2 (it does enforce the signature when one is present)', async () => {
+    const result = await byId('N2').run(getOnlyAuthClient());
+    expect(result, JSON.stringify(result)).toMatchObject({ id: 'N2', pass: true });
+  });
+
+  it('the correct in-process connector still passes N1', async () => {
+    const result = await byId('N1').run(correctClient());
+    expect(result, JSON.stringify(result)).toMatchObject({ id: 'N1', pass: true });
+  });
+});
+
+describe('S3 — D-2: N2 exercises the ±300s replay-window boundary', () => {
+  it('a connector with a ±600s window → N2 pass:false on the ~330s probe', async () => {
+    const result = await byId('N2').run(laxWindowClient());
+    expect(result).toMatchObject({ id: 'N2', pass: false });
+    expect(result.detail ?? '').toMatch(/330s/);
+    expect(result.detail ?? '').toMatch(/signature/i);
+  });
+
+  it('the correct in-process connector still passes N2 (rejects every skew probe)', async () => {
+    const result = await byId('N2').run(correctClient());
+    expect(result, JSON.stringify(result)).toMatchObject({ id: 'N2', pass: true });
   });
 });
 

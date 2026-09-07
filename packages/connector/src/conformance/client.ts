@@ -39,7 +39,10 @@ function corruptSignature(signature: string): string {
  * How far in the past `postWithExpiredSignature` back-dates its timestamp.
  * The contract's replay window is ±300s; 1000s is unambiguously outside it in
  * either direction after clock skew, so `verify()` short-circuits to
- * `reason: 'expired'` before it computes any HMAC.
+ * `reason: 'expired'` before it computes any HMAC. N2 also probes just outside
+ * the boundary (~330s) via {@link ConformanceClient.postWithSkewedSignature} —
+ * a connector with a lax replay window rejects the 1000s probe yet accepts a
+ * 330s-stale replay.
  */
 const EXPIRED_SIGNATURE_SKEW_SECONDS = 1000;
 
@@ -180,9 +183,22 @@ export interface ConformanceClient {
   /**
    * POST whose signature is computed **correctly** over the body, but over a
    * timestamp far outside the ±300s replay window — i.e. well-formed yet
-   * expired. Used by N2 alongside {@link postWithBadSignature}.
+   * expired. Used by N2 alongside {@link postWithBadSignature}. Equivalent to
+   * `postWithSkewedSignature(path, body, EXPIRED_SIGNATURE_SKEW_SECONDS)`.
    */
   postWithExpiredSignature(path: string, body: unknown): Promise<WireResponse>;
+  /**
+   * POST whose signature is computed **correctly** over the body, but over a
+   * timestamp `now - skewSeconds`. Positive `skewSeconds` back-dates the
+   * timestamp (a stale replay); negative `skewSeconds` post-dates it (a
+   * future-dated request). N2 uses it to probe just outside the ±300s replay
+   * window (~330s past and ~330s future) as well as far outside it.
+   */
+  postWithSkewedSignature(
+    path: string,
+    body: unknown,
+    skewSeconds: number,
+  ): Promise<WireResponse>;
   /**
    * A correctly-signed request with an arbitrary HTTP method. Used by N8 to
    * fire `PUT`/`DELETE`/`PATCH` (and `POST`) at the connector; a body is sent —
@@ -227,6 +243,21 @@ export function createConformanceClient(options: ConformanceClientOptions): Conf
     const timestamp = Math.floor(now() / 1000);
     const signature = sign(signedBodyFor(method, rawBody), timestamp, secretBuf);
     return { [TIMESTAMP_HEADER]: String(timestamp), [SIGNATURE_HEADER]: signature };
+  }
+
+  /** POST a correctly-signed body over a timestamp offset by `skewSeconds`
+   *  (positive = past, negative = future). Backs both
+   *  `postWithSkewedSignature` and `postWithExpiredSignature`. */
+  function sendSkewedPost(path: string, body: unknown, skewSeconds: number): Promise<WireResponse> {
+    const raw = JSON.stringify(body ?? {});
+    const timestamp = Math.floor(now() / 1000) - skewSeconds;
+    const signature = sign(signedBodyFor('POST', raw), timestamp, secretBuf);
+    const headers = new Headers({
+      'content-type': 'application/json',
+      [TIMESTAMP_HEADER]: String(timestamp),
+      [SIGNATURE_HEADER]: signature,
+    });
+    return send('POST', path, headers, raw);
   }
 
   async function send(
@@ -309,18 +340,12 @@ export function createConformanceClient(options: ConformanceClientOptions): Conf
       return send('POST', path, headers, raw);
     },
 
+    postWithSkewedSignature(path, body, skewSeconds) {
+      return sendSkewedPost(path, body, skewSeconds);
+    },
+
     postWithExpiredSignature(path, body) {
-      const raw = JSON.stringify(body ?? {});
-      // Back-dated well past the replay window; the signature itself is valid
-      // for this (stale) timestamp.
-      const timestamp = Math.floor(now() / 1000) - EXPIRED_SIGNATURE_SKEW_SECONDS;
-      const signature = sign(signedBodyFor('POST', raw), timestamp, secretBuf);
-      const headers = new Headers({
-        'content-type': 'application/json',
-        [TIMESTAMP_HEADER]: String(timestamp),
-        [SIGNATURE_HEADER]: signature,
-      });
-      return send('POST', path, headers, raw);
+      return sendSkewedPost(path, body, EXPIRED_SIGNATURE_SKEW_SECONDS);
     },
 
     request(method, path, body) {
