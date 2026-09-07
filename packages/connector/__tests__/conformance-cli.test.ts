@@ -26,14 +26,21 @@ afterEach(async () => {
 });
 
 describe('S1 conformance CLI', () => {
-  it('exits 0 and reports "0 cases run" with an empty registry', async () => {
+  it('runs a selected case against a reachable connector and reports it', async () => {
+    // The stub answers a valid HealthResponse, so the P1 case passes; the
+    // point here is CLI plumbing (connect → run → report → exit 0), not the
+    // registry being empty (it no longer is).
     stub = await startStubConnector(SECRET);
     const cap = capture();
 
-    const code = await main(['conformance', '--url', stub.url, '--secret', SECRET], cap.io);
+    const code = await main(
+      ['conformance', '--url', stub.url, '--secret', SECRET, '--case', 'P1'],
+      cap.io,
+    );
 
     expect(code).toBe(0);
-    expect(cap.out()).toContain('0 cases run');
+    expect(cap.out()).toContain('P1');
+    expect(cap.out()).toContain('1 passed, 0 failed');
     expect(cap.err()).toBe('');
   });
 
@@ -80,14 +87,17 @@ describe('S1 conformance CLI', () => {
     stub = await startStubConnector(SECRET);
     const cap = capture();
 
-    const code = await main(['--url', stub.url, '--secret', SECRET, '--json'], cap.io);
+    const code = await main(
+      ['--url', stub.url, '--secret', SECRET, '--json', '--case', 'P1'],
+      cap.io,
+    );
 
     expect(code).toBe(0);
     const parsed = JSON.parse(cap.out());
     expect(Object.keys(parsed).sort()).toEqual(['cases', 'failed', 'passed', 'url']);
     expect(parsed.url).toBe(stub.url);
-    expect(parsed.cases).toEqual([]);
-    expect(parsed.passed).toBe(0);
+    expect(parsed.cases).toEqual([{ id: 'P1', pass: true }]);
+    expect(parsed.passed).toBe(1);
     expect(parsed.failed).toBe(0);
   });
 
@@ -101,15 +111,17 @@ describe('S1 conformance CLI', () => {
   });
 
   it('preflight tolerates a connector that answers but rejects the signature', async () => {
-    // enforceSignature stub with a DIFFERENT secret: /health comes back 401,
-    // but that still proves we connected — exit 0, "0 cases run".
+    // enforceSignature stub with a DIFFERENT secret: /health comes back 401.
+    // That still proves we connected, so this is a normal run whose cases
+    // fail (exit 1) — never a runner error (exit 2), and never a connection
+    // error on stderr.
     stub = await startStubConnector('a-different-secret');
     const cap = capture();
 
     const code = await main(['--url', stub.url, '--secret', SECRET], cap.io);
 
-    expect(code).toBe(0);
-    expect(cap.out()).toContain('0 cases run');
+    expect(code).toBe(1);
+    expect(cap.err()).not.toMatch(/could not connect|preflight/);
   });
 
   it('unknown --case id → exit 2 (runner error)', async () => {

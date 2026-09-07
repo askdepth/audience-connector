@@ -1,8 +1,15 @@
-// Orchestration for a conformance run. S1 ships an **empty** case registry:
-// the goal is only that the CLI connects and honestly reports "0 cases run".
-// Case definitions land here in S2+.
+// Orchestration for a conformance run. S1 shipped an empty registry; S2 wires
+// the seven **positive** cases from `docs/conformance-spec.md` ("a connector
+// must pass, to activate"). Negative cases land in S3+.
 
 import type { ConformanceClient } from './client';
+import { healthCase } from './cases/positive/health';
+import { schemaCase } from './cases/positive/schema';
+import { countCase } from './cases/positive/count';
+import { searchCase } from './cases/positive/search';
+import { externalIdInCase } from './cases/positive/external-id-in';
+import { attributeFiltersCase } from './cases/positive/attribute-filters';
+import { suppressExternalIdsCase } from './cases/positive/suppress-external-ids';
 
 export interface ConformanceCase {
   id: string;
@@ -16,8 +23,20 @@ export interface CaseResult {
   detail?: string;
 }
 
-/** The registry. Empty in S1 — do not add a case without a fixture that fails it. */
-export const CONFORMANCE_CASES: readonly ConformanceCase[] = Object.freeze([]);
+/**
+ * The registry, in `docs/conformance-spec.md` positive-list order (P1–P7).
+ * Every case here has both a "correct connector passes" and a
+ * "subtly-wrong connector fails" test in `__tests__/conformance-positive.test.ts`.
+ */
+export const CONFORMANCE_CASES: readonly ConformanceCase[] = Object.freeze([
+  healthCase,
+  schemaCase,
+  countCase,
+  searchCase,
+  externalIdInCase,
+  attributeFiltersCase,
+  suppressExternalIdsCase,
+]);
 
 export interface RunSummary {
   url: string;
