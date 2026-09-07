@@ -14,7 +14,9 @@
     "typecheck": "tsc --noEmit",
     "seed:generate": "tsx seed/generate.ts",
     "start:postgres": "tsx src/postgres-variant.ts",
-    "demo:postgres": "tsx scripts/demo-postgres.ts"
+    "demo:postgres": "tsx scripts/demo-postgres.ts",
+    "start:rest": "tsx src/rest-variant.ts",
+    "demo:rest": "tsx scripts/demo-rest.ts"
   },
   "dependencies": {
     "@askdepth/audience-connector": "workspace:*",

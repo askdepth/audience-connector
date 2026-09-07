@@ -2,9 +2,14 @@
 
 A **genuine, deployable** Askdepth Audience connector — not a mock. It is built
 on the public `@askdepth/audience-connector` package (real `createConnector`,
-real `postgresAdapter`, real HMAC signature verification, the real Express
-shim) over one seeded synthetic user base of 5,000 rows. It is never published
-to npm.
+a real adapter — `postgresAdapter` or `restAdapter` — real HMAC signature
+verification, the real Express shim) over one seeded synthetic user base of
+5,000 rows. It is never published to npm.
+
+Two variants serve that one seed and one field mapping through different
+adapters, and the full 15-case conformance suite produces the **same 15
+results** against both — the proof that the reference connector's behaviour is a
+property of the SDK and the mapping, not of Postgres.
 
 It serves three roles:
 
@@ -13,7 +18,8 @@ It serves three roles:
 - **Sales demo** — a live connector to point the conformance CLI at, with no
   platform UI in the loop.
 - **Reference implementation** — a client engineer reads `src/postgres-variant.ts`
-  to see what a correct, idiomatic connector looks like.
+  (or `src/rest-variant.ts`) to see what a correct, idiomatic connector looks
+  like.
 
 ## The Postgres variant
 
@@ -103,6 +109,58 @@ node packages/connector/dist/bin/conformance.js conformance \
 
 All 15 cases (7 positive + 8 negative) must pass.
 
+## The rest variant
+
+`src/rest-variant.ts` mounts a connector over the **same** S6 seed and the
+**same** canonical mapping as the Postgres variant, but through `restAdapter`
+instead of `postgresAdapter` — no database anywhere.
+
+Where a real `restAdapter` integrator points `fetchCandidates` at their own
+backend, this variant points it at `src/rest-fixture-api.ts`: a deliberately
+minimal in-memory JSON API that holds the 5,000 rows and answers `POST /query`
+and `POST /count`. It stands in for "the client's own backend" and is **not**
+part of the SDK's public surface. `start()` boots one on loopback automatically
+(or set `FIXTURE_API_URL` to use an already-running one).
+
+Division of responsibility (see `src/rest-fixture-api.ts` header for the full
+list):
+
+| guarantee                                             | upheld by            |
+| ---------------------------------------------------- | -------------------- |
+| 1,000-row response cap, column projection / stripping, canonical-row validation, query-bound cursor envelope | the frozen `restAdapter` |
+| filtering + `suppressExternalIds`, a stable total order + deterministic opaque cursor, an exact (never capped) count, a genuine uniform random subsample for `sample` requests | the fixture backend  |
+
+`declaredSchema` is **hand-written** (the rest adapter cannot introspect a
+client's store). Its column-**name** set is identical to what the Postgres
+variant introspects from `information_schema` over the same seed — the S8
+`rest-variant.test.ts` cross-check asserts this; only the `type` strings differ.
+
+### Run it
+
+```sh
+pnpm --recursive run build            # the variant consumes the *built* package
+
+REFERENCE_SECRET=dev-secret \
+  pnpm --filter @askdepth/reference-connector demo:rest
+```
+
+`demo:rest` prints the URL + secret and stays up until Ctrl-C. `start:rest` is
+the same boot without the demo banner (what the `reference-rest` CI job uses).
+`PORT` defaults to `8788` (distinct from the pg variant's `8787`, so both can
+run at once).
+
+Conformance — the exact invocation the `reference-rest` CI job asserts exits
+`0`:
+
+```sh
+node packages/connector/dist/bin/conformance.js conformance \
+  --url http://localhost:8788/askdepth/v1 --secret dev-secret \
+  --unmapped-column internal_notes --unmapped-column crm_account_id \
+  --filter-only-attribute country
+```
+
+Same seed, same mapping, same 15 results as the Postgres variant.
+
 ## Tests
 
 ```sh
@@ -113,3 +171,9 @@ pnpm --filter @askdepth/reference-connector test
 `DATABASE_URL`: it skips cleanly with no database, and is mandatory in CI. With
 a database present it boots the variant in-process, runs the full 15-case suite
 through the built CLI, and re-asserts the `GET /schema` introspection shape.
+
+`__tests__/rest-variant.test.ts` needs **no** database: it boots the rest
+variant + its fixture backend in-process, runs the full 15-case suite through
+the built CLI, and checks `GET /schema` is returned verbatim. One test in it —
+the rest-vs-postgres `/schema` column-name parity check — is DB-gated in the
+same way and mandatory in CI.
