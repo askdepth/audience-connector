@@ -1,9 +1,10 @@
 name: Release
 
-# Push a tag like `v0.1.0` on `main` to publish. Both packages are published
-# from a single job, in order, because @askdepth/audience-connector depends on a
-# pinned exact version of @askdepth/audience-contract that must already resolve
-# on the registry.
+# Push a tag like `vX.Y.Z` on `main` to publish. The version actually published
+# is read from each package's package.json, not from the tag — keep them in sync.
+# Both packages are published from a single job, in order, because
+# @askdepth/audience-connector depends on a pinned exact version of
+# @askdepth/audience-contract that must already resolve on the registry.
 on:
   push:
     tags: ['v*']
