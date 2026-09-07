@@ -9,12 +9,13 @@
 
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { CONFORMANCE_CASES, runConformance } from '../src/conformance/runner';
-import type { ConformanceCase } from '../src/conformance/runner';
+import type { ConformanceCase, ConformanceCaseContext } from '../src/conformance/runner';
 import { main } from '../src/bin/conformance';
 import {
   brokenClient,
   brokenHealthClient,
   correctClient,
+  correctClientNoReturnable,
   type Bug,
 } from './_conformance-fixtures';
 import { startStubConnector, type StubConnector } from './_conformance-stub';
@@ -60,9 +61,21 @@ describe('S2 — a subtly-wrong connector fails the matching case', () => {
     P7: () => brokenClient('ignoreSuppress'),
   };
 
+  // P6's leak is only a *conformance* failure once the operator declares which
+  // attribute is filter-only: without `--filter-only-attribute` a connector
+  // that returns `plan` in rows is not non-conformant (E-1). So grade the
+  // broken P6 fixture in declared mode.
+  const contextFor: Partial<Record<(typeof ALL_IDS)[number], ConformanceCaseContext>> = {
+    P6: {
+      unmappedColumns: [],
+      filterOnlyAttributes: ['plan'],
+      filterOnlyAttributeValues: {},
+    },
+  };
+
   for (const id of ALL_IDS) {
     it(`${id} fails with an expected-vs-observed detail`, async () => {
-      const result = await byId(id).run(brokenFor[id]());
+      const result = await byId(id).run(brokenFor[id](), contextFor[id]);
       expect(result.id).toBe(id);
       expect(result.pass).toBe(false);
       expect(typeof result.detail).toBe('string');
@@ -104,6 +117,88 @@ describe('S2 — the broken fixtures are wrong ONLY for their own case', () => {
       }
     });
   }
+});
+
+describe('P6 — attribute-filter grading no longer hardcodes the connector schema', () => {
+  const P6 = () => byId('P6');
+  const declared = (
+    filterOnlyAttributes: string[],
+    filterOnlyAttributeValues: Record<string, string> = {},
+  ): ConformanceCaseContext => ({
+    unmappedColumns: [],
+    filterOnlyAttributes,
+    filterOnlyAttributeValues,
+  });
+
+  it('no flag, correct connector → passes by exercising a real returnable-attribute filter', async () => {
+    const r = await P6().run(correctClient());
+    expect(r, JSON.stringify(r)).toMatchObject({ id: 'P6', pass: true });
+    // Not a vacuous pass: a concrete attr.* filter on a discovered returnable
+    // attribute was sent and its value checked on every row.
+    expect(r.detail).toMatch(/exercised attr\.\* filtering on the observed returnable attribute/);
+    expect(r.detail).toMatch(/attr\.tier ==/);
+    expect(r.detail).toMatch(/count \d+/);
+    expect(r.detail).not.toMatch(/projects no returnable attributes/);
+  });
+
+  it('no flag, connector with NO returnable attributes → honest limited pass that names the limitation', async () => {
+    const r = await P6().run(correctClientNoReturnable());
+    expect(r, JSON.stringify(r)).toMatchObject({ id: 'P6', pass: true });
+    expect(r.detail).toMatch(/connector projects no returnable attributes/);
+    expect(r.detail).toMatch(/--filter-only-attribute/);
+  });
+
+  it('--filter-only-attribute plan=pro → passes; detail shows the declared filter narrowed and stayed absent', async () => {
+    const r = await P6().run(correctClient(), declared(['plan'], { plan: 'pro' }));
+    expect(r, JSON.stringify(r)).toMatchObject({ id: 'P6', pass: true });
+    expect(r.detail).toMatch(/filtered on attr\.plan == "pro"/);
+    expect(r.detail).toMatch(/subset of \d+/);
+    expect(r.detail).toMatch(/"plan" absent from every row/);
+    // The additive returnable cross-check still ran.
+    expect(r.detail).toMatch(/also filtered on returnable attr\.tier/);
+  });
+
+  it('--filter-only-attribute plan (no value) → passes; detail shows the structural-acceptance probe ran', async () => {
+    const r = await P6().run(correctClient(), declared(['plan']));
+    expect(r, JSON.stringify(r)).toMatchObject({ id: 'P6', pass: true });
+    expect(r.detail).toMatch(/filtered on attr\.plan == <sentinel>: accepted structurally/);
+    expect(r.detail).toMatch(/"plan" absent from every row/);
+  });
+
+  describe('subtly-wrong connectors fail, each with a detail that names the problem', () => {
+    it('(a) leaks the filter-only attribute into rows', async () => {
+      const r = await P6().run(brokenClient('leakFilterAttribute'), declared(['plan'], { plan: 'pro' }));
+      expect(r).toMatchObject({ id: 'P6', pass: false });
+      expect(r.detail).toMatch(/expected/i);
+      expect(r.detail).toMatch(/plan/);
+    });
+
+    it('(b) ignores an attr.* filter entirely (returns the full set regardless)', async () => {
+      const r = await P6().run(brokenClient('ignoreAttrFilter'));
+      expect(r).toMatchObject({ id: 'P6', pass: false });
+      expect(r.detail).toMatch(/expected/i);
+      expect(r.detail).toMatch(/filter ignored, not applied/);
+    });
+
+    it('(b) ignores an attr.* filter — also caught in declared mode', async () => {
+      const r = await P6().run(brokenClient('ignoreAttrFilter'), declared(['plan'], { plan: 'pro' }));
+      expect(r).toMatchObject({ id: 'P6', pass: false });
+      expect(r.detail).toMatch(/expected/i);
+    });
+
+    it('(c) 400s on any attr.* clause', async () => {
+      const r = await P6().run(brokenClient('rejectAttrFilter'));
+      expect(r).toMatchObject({ id: 'P6', pass: false });
+      expect(r.detail).toMatch(/expected/i);
+      expect(r.detail).toMatch(/observed 400/);
+    });
+
+    it('(c) 400s on any attr.* clause — also caught in declared mode', async () => {
+      const r = await P6().run(brokenClient('rejectAttrFilter'), declared(['plan']));
+      expect(r).toMatchObject({ id: 'P6', pass: false });
+      expect(r.detail).toMatch(/expected the connector to accept and process an attr\.plan filter/);
+    });
+  });
 });
 
 describe('S2 — case selection with a populated registry', () => {

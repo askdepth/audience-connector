@@ -17,6 +17,7 @@
 
 import { verify } from '@askdepth/audience-contract';
 import { createConnector } from '../src/index';
+import { ConnectorError } from '../src/errors';
 import type { Adapter } from '../src/types';
 import type { QueryPlan } from '../src/plan';
 import {
@@ -93,16 +94,46 @@ export function correctClient(): ConformanceClient {
   return connectorClient(memAdapter(syntheticUsers(), { columns: FIXTURE_COLUMNS }));
 }
 
+/**
+ * A correct connector that declares NO returnable attributes — `plan` and
+ * `tier` stay filter-only, so no row ever carries an `attributes` payload.
+ * Used to exercise P6's honest-limitation branch (no-flag mode, nothing to
+ * filter on).
+ */
+export function correctClientNoReturnable(): ConformanceClient {
+  const connector = createConnector({
+    secret: FIXTURE_SECRET,
+    adapter: memAdapter(syntheticUsers(), { columns: FIXTURE_COLUMNS }),
+    fieldMapping: FIXTURE_FIELD_MAPPING,
+    attributes: { filterable: ['plan', 'tier'], returnable: [] },
+  });
+  const fetchImpl: typeof fetch = async (input, init) => {
+    const req = new Request(input as unknown as string, init as RequestInit);
+    return connector.fetch(req);
+  };
+  return createConformanceClient({ url: BASE_URL, secret: FIXTURE_SECRET, fetchImpl });
+}
+
 export type Bug =
   | 'emptySchema' // P2: /schema returns { columns: [] }
   | 'negativeCount' // P3: count returns -1
   | 'noCursor' // P4: search never returns nextCursor
   | 'ignoreExternalIdIn' // P5: externalId IN filter is dropped
   | 'leakFilterAttribute' // P6: filter-only attribute echoed into every row
+  | 'ignoreAttrFilter' // P6: every attr.* filter is dropped (full set returned)
+  | 'rejectAttrFilter' // P6: any attr.* clause is answered with malformed_request
   | 'ignoreSuppress'; // P7: suppressExternalIds is ignored
 
 function withoutExternalIdFilter(plan: QueryPlan): QueryPlan {
   return { ...plan, filters: plan.filters.filter((f) => f.canonical !== 'externalId') };
+}
+
+function withoutAttributeFilters(plan: QueryPlan): QueryPlan {
+  return { ...plan, filters: plan.filters.filter((f) => !f.isAttribute) };
+}
+
+function hasAttributeFilter(plan: QueryPlan): boolean {
+  return plan.filters.some((f) => f.isAttribute);
 }
 
 /** The synthetic connector with exactly one violation wired in. */
@@ -116,22 +147,32 @@ export function brokenClient(bug: Bug): ConformanceClient {
       return bug === 'emptySchema' ? { columns: [] } : real;
     },
     async count(plan, ctx) {
+      if (bug === 'rejectAttrFilter' && hasAttributeFilter(plan)) {
+        throw new ConnectorError('malformed_request');
+      }
       const p =
         bug === 'ignoreExternalIdIn'
           ? withoutExternalIdFilter(plan)
-          : bug === 'ignoreSuppress'
-            ? { ...plan, suppress: [] }
-            : plan;
+          : bug === 'ignoreAttrFilter'
+            ? withoutAttributeFilters(plan)
+            : bug === 'ignoreSuppress'
+              ? { ...plan, suppress: [] }
+              : plan;
       const real = await base.count(p, ctx);
       return bug === 'negativeCount' ? -1 : real;
     },
     async search(plan, ctx) {
+      if (bug === 'rejectAttrFilter' && hasAttributeFilter(plan)) {
+        throw new ConnectorError('malformed_request');
+      }
       const p =
         bug === 'ignoreExternalIdIn'
           ? withoutExternalIdFilter(plan)
-          : bug === 'ignoreSuppress'
-            ? { ...plan, suppress: [] }
-            : plan;
+          : bug === 'ignoreAttrFilter'
+            ? withoutAttributeFilters(plan)
+            : bug === 'ignoreSuppress'
+              ? { ...plan, suppress: [] }
+              : plan;
       const real = await base.search(p, ctx);
 
       if (bug === 'noCursor') return { rows: real.rows };
