@@ -32,11 +32,15 @@
 //     seeded per pull from `seed`, so it is a real sample rather than insertion
 //     order, and different pulls draw independently (N7).
 //
-// Ordering key: `md5(seed || "|" || external_id)` — the same shape the postgres
-// adapter uses internally (`md5(seed || extId)`), so both variants shuffle the
-// identical dataset the identical way in spirit: uncorrelated with signup order
-// (so "first N" is a fair sample) yet fully deterministic for a fixed seed (so
-// pagination is stable).
+// Ordering key: `md5(seed || "|" || external_id)` — the fixture backend's OWN
+// deterministic ordering key. It is deliberately not required to match, and does
+// not match, the postgres adapter's internal key (`md5(seedParam || extIdCol`
+// `::text)`, no `"|"` separator): the two produce a different row order for the
+// same seed. That is fine. The conformance guarantee is "same seed, same
+// mapping, same 15 verdicts", not identical row order, and a cursor is never
+// shared between the two variants. What this key MUST be — and is — is
+// uncorrelated with signup order (so "first N" is a fair sample) yet fully
+// deterministic for a fixed seed (so pagination is stable).
 
 import { createHash } from 'node:crypto';
 import type { AddressInfo } from 'node:net';

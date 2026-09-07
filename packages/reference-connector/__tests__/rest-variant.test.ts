@@ -152,10 +152,46 @@ describe('S8 — rest variant over the seeded reference base (no DB)', () => {
 // DB-gated — needs the Postgres variant. Skips cleanly with no DB; MANDATORY in
 // CI (the `reference-postgres` job provides one).
 
-const DSN = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL;
+// Resolve the DB from the DEDICATED var first (review finding G-1): the
+// cross-check below seeds `reference_users` and drops it in teardown, so a
+// developer with `DATABASE_URL` pointed at a real database must not be hit.
+const DSN =
+  process.env.REFERENCE_CONNECTOR_TEST_DB_URL ??
+  process.env.TEST_DATABASE_URL ??
+  process.env.DATABASE_URL ??
+  '';
+
+// ── Destructive-seed safety guard (review finding G-1) ─────────────────────
+// Same gate as `postgres-variant.test.ts`: this cross-check runs
+// `seed/fixtures.sql` (`DROP TABLE IF EXISTS "reference_users"` + CREATE) and a
+// DROP in teardown. Only proceed when the target is unmistakably disposable —
+// `REFERENCE_CONNECTOR_TEST_DB_URL` was the source (explicit opt-in) OR the
+// DSN's database name names a test DB.
+const TEST_DB_NAME_RE = /(^|[_-])test($|[_-])|_test\d*$|test_?ref|reference_test/i;
+
+function dbNameOf(dsn: string): string {
+  try {
+    return new URL(dsn).pathname.replace(/^\//, '');
+  } catch {
+    return '';
+  }
+}
+
+const seedOptIn = process.env.REFERENCE_CONNECTOR_TEST_DB_URL !== undefined;
+const dbName = dbNameOf(DSN);
+const guardPassed = DSN !== '' && (seedOptIn || TEST_DB_NAME_RE.test(dbName));
+
+if (DSN !== '' && !guardPassed) {
+  const msg =
+    `[reference-connector variant DB guard] refusing to seed a non-test database ` +
+    `"${dbName || DSN}": the /schema cross-check runs DROP/CREATE on "reference_users". ` +
+    `Set REFERENCE_CONNECTOR_TEST_DB_URL to a disposable database to opt in.`;
+  if (process.env.CI) throw new Error(msg);
+  console.warn(msg);
+}
 
 let dbAvailable = false;
-if (DSN) {
+if (guardPassed) {
   try {
     const probe = new Pool({ connectionString: DSN, connectionTimeoutMillis: 2000, max: 1 });
     await probe.query('SELECT 1');
@@ -167,7 +203,7 @@ if (DSN) {
 }
 
 it('the /schema cross-check requires a Postgres when DSN is set (mandatory in CI)', () => {
-  if (process.env.CI) expect(dbAvailable).toBe(true);
+  if (process.env.CI && guardPassed) expect(dbAvailable).toBe(true);
 });
 
 const dbDescribe = dbAvailable ? describe : describe.skip;

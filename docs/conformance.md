@@ -39,7 +39,11 @@ expired or malformed signature; N3 returns unmapped columns; N4 leaks
 credentials or row data in an error response; N5 returns non-deterministic
 cursor pagination; N6 exceeds the 1,000-row result cap; N7 returns a
 non-random subsample when `randomSample` is advertised; N8 exposes any write
-path.
+path. N8 also sends a SQL-shaped criteria value (`'; DROP TABLE …; --`) and
+checks it is treated as an ordinary, non-matching filter value — this is a
+**smoke test that the criteria DSL escapes literal values, not a guarantee of
+SQL-injection resistance**; a connector's own query parameterisation is what
+provides that, and it is out of scope for a black-box conformance run.
 
 ## Getting the CLI
 
@@ -156,6 +160,16 @@ connector should **allow exactly one retry for N7 specifically** (e.g.
 `--case N7` re-run on a first N7 failure) before treating it as a real failure.
 Do not blanket-retry the whole suite — the other 14 cases are deterministic and
 a retry there would only mask a real regression.
+
+### N8's SQL-shaped-value probe is a smoke test, not a SQLi guarantee
+
+Alongside the write-path check, N8 sends `'; DROP TABLE candidates; --` as an
+ordinary criteria value and asserts the connector treats it as a plain,
+non-matching filter value (no HTTP error, data still intact afterwards). That is
+a **smoke test that the criteria DSL escapes literal values** — it is **not** a
+proof of SQL-injection resistance. A black-box run cannot establish that; a
+connector's own parameterised queries are what provide it, and that is out of
+scope for conformance.
 
 ## Positive cases
 

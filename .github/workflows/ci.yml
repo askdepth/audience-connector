@@ -29,6 +29,11 @@ jobs:
     env:
       CI: 'true'
       TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/connector_test
+      # Explicit opt-in for the reference-connector variant tests' destructive
+      # seed (they DROP/CREATE `reference_users`). This Postgres is a throwaway
+      # service container, so seeding it is safe; naming the dedicated var makes
+      # that intent unambiguous to the guard rather than relying on the DB name.
+      REFERENCE_CONNECTOR_TEST_DB_URL: postgres://postgres:postgres@localhost:5432/connector_test
 
     steps:
       - uses: actions/checkout@v7

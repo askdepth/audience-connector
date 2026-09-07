@@ -54,23 +54,62 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
 const execFileAsync = promisify(execFile);
 
+// Resolve the DB from the DEDICATED var first (review finding G-1): a developer
+// with `DATABASE_URL` pointed at a real database must not lose `reference_users`
+// to this suite's DROP/CREATE.
 const DSN =
+  process.env.REFERENCE_CONNECTOR_TEST_DB_URL ??
   process.env.TEST_DATABASE_URL ??
   process.env.DATABASE_URL ??
-  'postgres://postgres:postgres@127.0.0.1:5432/postgres';
+  '';
+
+// ── Destructive-seed safety guard (review finding G-1) ─────────────────────
+// This suite runs `seed/fixtures.sql` — which begins
+// `DROP TABLE IF EXISTS "reference_users"` — and drops the table again in
+// teardown. Refuse that unless the operator has clearly pointed us at a
+// disposable database: either `REFERENCE_CONNECTOR_TEST_DB_URL` was the source
+// (explicit opt-in) OR the resolved DSN's database name unmistakably names a
+// test DB.
+const TEST_DB_NAME_RE = /(^|[_-])test($|[_-])|_test\d*$|test_?ref|reference_test/i;
+
+function dbNameOf(dsn: string): string {
+  try {
+    return new URL(dsn).pathname.replace(/^\//, '');
+  } catch {
+    return '';
+  }
+}
+
+const seedOptIn = process.env.REFERENCE_CONNECTOR_TEST_DB_URL !== undefined;
+const dbName = dbNameOf(DSN);
+const guardPassed = DSN !== '' && (seedOptIn || TEST_DB_NAME_RE.test(dbName));
+
+if (DSN !== '' && !guardPassed) {
+  const msg =
+    `[reference-connector variant DB guard] refusing to seed a non-test database ` +
+    `"${dbName || DSN}": the variant tests run DROP/CREATE on "reference_users". ` +
+    `Set REFERENCE_CONNECTOR_TEST_DB_URL to a disposable database to opt in.`;
+  // In CI a misconfigured pipeline must be loud, not silently skipped.
+  if (process.env.CI) throw new Error(msg);
+  console.warn(msg);
+}
 
 let available = false;
-try {
-  const probe = new Pool({ connectionString: DSN, connectionTimeoutMillis: 2000, max: 1 });
-  await probe.query('SELECT 1');
-  await probe.end();
-  available = true;
-} catch {
-  available = false;
+if (guardPassed) {
+  try {
+    const probe = new Pool({ connectionString: DSN, connectionTimeoutMillis: 2000, max: 1 });
+    await probe.query('SELECT 1');
+    await probe.end();
+    available = true;
+  } catch {
+    available = false;
+  }
 }
 
 it('the postgres reference-connector variant requires a Postgres (mandatory in CI)', () => {
-  if (process.env.CI) expect(available).toBe(true);
+  // Only meaningful once the guard has passed; a guard failure has already
+  // thrown above in CI.
+  if (process.env.CI && guardPassed) expect(available).toBe(true);
 });
 
 const CLI = resolve(HERE, '../../connector/dist/bin/conformance.js');

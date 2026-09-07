@@ -94,6 +94,35 @@ it reaches `listening on :<port>` even when the database is unreachable — it o
 needs `DATABASE_URL` to be *set*. It still refuses to start if `REFERENCE_SECRET`
 or `DATABASE_URL` is missing.
 
+### Running the variant tests (they seed + drop `reference_users`)
+
+`__tests__/postgres-variant.test.ts` and the `/schema` cross-check in
+`__tests__/rest-variant.test.ts` are gated on a real Postgres. **They run
+`seed/fixtures.sql` — which begins `DROP TABLE IF EXISTS "reference_users"` —
+and drop the table again in teardown**, so point them only at a disposable
+database.
+
+They resolve the DB URL in this order:
+
+1. `REFERENCE_CONNECTOR_TEST_DB_URL` — the dedicated, explicit opt-in. **Prefer
+   this.**
+2. `TEST_DATABASE_URL`
+3. `DATABASE_URL`
+
+A destructive-seed guard refuses to run the DROP/CREATE unless either
+`REFERENCE_CONNECTOR_TEST_DB_URL` was the source, or the resolved DSN's database
+name unmistakably names a test DB (matches
+`/(^|[_-])test($|[_-])|_test\d*$|test_?ref|reference_test/i`). When the guard
+fails the tests **skip** locally (with a console note) and **throw** in CI (so a
+misconfigured pipeline is loud). This is what keeps a developer whose
+`DATABASE_URL` points at a real database from losing `reference_users` — set
+`REFERENCE_CONNECTOR_TEST_DB_URL` to a throwaway Postgres to run them:
+
+```sh
+REFERENCE_CONNECTOR_TEST_DB_URL=postgres://postgres:postgres@127.0.0.1:55432/reference_test \
+  pnpm --filter @askdepth/reference-connector test
+```
+
 ## 3. The seed's field mapping
 
 Exported from `packages/reference-connector/seed/generate.ts` and shared verbatim
