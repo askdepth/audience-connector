@@ -7,6 +7,14 @@
 // neither a canonical field nor something the connector itself declares in
 // `/schema` is an unmapped column that leaked — most often a raw `SELECT *`.
 //
+// Spec item 3 ("returns unmapped columns") is about **candidate-data
+// leakage**, not schema introspection. A genuine postgres connector's
+// `/schema` legitimately lists every introspected store column — including
+// ones that are not in `fieldMapping` (P2, `postgres.test.ts` S6.16). So this
+// case grades **only** the candidate-data responses: `/candidates/search` row
+// payloads and `/candidates/count` bodies. A declared-unmapped name appearing
+// in `/schema` `columns` is NOT a failure.
+//
 // Two modes:
 //
 //   * **Structural (always).** Every key of every `/candidates/search` row must
@@ -18,10 +26,11 @@
 //
 //   * **Declared (when `--unmapped-column <name>` was given).** The operator
 //     has named store columns that exist in the backing data but are
-//     intentionally unmapped and sensitive; they must appear in NO response.
-//     The case asserts each declared name is absent from `/schema` and from
-//     every `/candidates/search` response body (raw text — catches a nested or
-//     renamed leak too).
+//     intentionally unmapped and sensitive; they must appear in no
+//     **candidate-data** response. The case asserts each declared name is
+//     absent from every `/candidates/search` response body and every
+//     `/candidates/count` body (raw text — catches a nested or renamed leak
+//     too). `/schema` is deliberately not graded here.
 //
 // Only the wire is exercised; the out-of-band list is the sole extra input and
 // it arrives through {@link ConformanceCaseContext}, never over the protocol.
@@ -114,24 +123,31 @@ async function searchProbe(
   return { ok: true, probe: { label, res, rows: rows as Array<Record<string, unknown>> } };
 }
 
+async function countProbe(
+  client: ConformanceClient,
+  label: string,
+  mapping: Record<string, string>,
+): Promise<{ ok: true; res: WireResponse } | { ok: false; detail: string }> {
+  const res = await client.post('/candidates/count', { criteria: { all: [] }, mapping });
+  if (res.status !== 200) {
+    return { ok: false, detail: `${label}: expected HTTP 200, observed ${res.status}: "${res.bodyText.slice(0, 160)}"` };
+  }
+  return { ok: true, res };
+}
+
 export const unmappedColumnsLeakedCase: ConformanceCase = {
   id: 'N3',
   kind: 'negative',
   async run(client, context) {
     const declared = [...(context?.unmappedColumns ?? [])];
 
+    // `/schema` is fetched only to seed the structural row-key check below.
+    // A declared-unmapped name appearing in `/schema` `columns` is legitimate
+    // (a postgres connector introspects the whole store) and is NOT graded —
+    // spec item 3 is about candidate-data leakage.
     const schema = await schemaColumnNames(client);
     if (!schema.ok) return fail(schema.detail);
     const schemaCols = schema.names;
-
-    // 1. Declared sensitive columns must not be exposed by /schema itself.
-    for (const col of declared) {
-      if (schemaCols.has(col)) {
-        return fail(
-          `column "${col}" was declared unmapped and sensitive (--unmapped-column), yet GET /schema lists it — it must appear in no response`,
-        );
-      }
-    }
 
     const probes: SearchProbe[] = [];
     for (const [label, mapping] of [
@@ -143,11 +159,33 @@ export const unmappedColumnsLeakedCase: ConformanceCase = {
       probes.push(p.probe);
     }
 
+    // 1. Declared sensitive columns must not appear in a `/candidates/count`
+    //    body either (a careless connector might echo the plan / mapping).
+    let countsSeen = 0;
+    if (declared.length > 0) {
+      for (const [label, mapping] of [
+        ['POST /candidates/count (identity mapping)', MINIMAL_MAPPING],
+        ['POST /candidates/count (display mapping)', DISPLAY_MAPPING],
+      ] as const) {
+        const c = await countProbe(client, label, mapping);
+        if (!c.ok) return fail(c.detail);
+        countsSeen++;
+        for (const col of declared) {
+          if (c.res.bodyText.includes(col)) {
+            return fail(
+              `${label}: response body contains the declared unmapped column "${col}" — a count response must carry nothing but the integer`,
+            );
+          }
+        }
+      }
+    }
+
     let rowsSeen = 0;
     for (const { label, res, rows } of probes) {
       rowsSeen += rows.length;
 
-      // 2. Declared sensitive columns must not appear anywhere in the body.
+      // 2. Declared sensitive columns must not appear anywhere in a
+      //    candidate-data (search) body.
       for (const col of declared) {
         if (res.bodyText.includes(col)) {
           return fail(
@@ -186,7 +224,7 @@ export const unmappedColumnsLeakedCase: ConformanceCase = {
       return {
         id: 'N3',
         pass: true,
-        detail: `checked ${declared.length} declared unmapped column(s) [${declared.join(', ')}] against /schema and ${rowsSeen} search row(s): none exposed`,
+        detail: `checked ${declared.length} declared unmapped column(s) [${declared.join(', ')}] against ${countsSeen} count body/bodies and ${rowsSeen} search row(s): none exposed (/schema not graded)`,
       };
     }
     return {

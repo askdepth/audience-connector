@@ -33,7 +33,9 @@ export interface ConformanceCaseContext {
   /**
    * Store columns the operator has declared exist in the backing data but are
    * intentionally not in `fieldMapping` — and, being sensitive, must appear in
-   * NO response (`/candidates/search` rows or `/schema`). Consumed by N3.
+   * no **candidate-data** response (`/candidates/search` row payloads and
+   * `/candidates/count` bodies). Consumed by N3. `/schema` is not graded
+   * against this list — a connector legitimately introspects the whole store.
    * Empty when the operator supplied no `--unmapped-column`.
    */
   readonly unmappedColumns: readonly string[];
