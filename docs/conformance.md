@@ -1,10 +1,34 @@
 # Conformance suite
 
-`npx @askdepth/audience-connector conformance --url <url> --secret <secret>`
-runs the checklist in [`conformance-spec.md`](./conformance-spec.md) against a
-deployed connector. The negative cases (N1–N8) are where the value is: a runner
-that passes everything is worse than none, because it turns an untested
-integration into a certified one.
+`audience-connector conformance --url <url> --secret <secret>` runs the
+checklist in [`conformance-spec.md`](./conformance-spec.md) against a deployed
+connector. The negative cases (N1–N8) are where the value is: a runner that
+passes everything is worse than none, because it turns an untested integration
+into a certified one.
+
+## Getting the CLI
+
+The runner ships **inside the `@askdepth/audience-connector` package** as a
+`bin` (`audience-connector` → `dist/bin/conformance.js`). Once the package is
+installed it runs as `audience-connector conformance …`, or
+`npx audience-connector conformance …` from a project that depends on it — no
+separate install, no workspace context required.
+
+Packaging is verified end to end (S9.5): `npm pack` the connector workspace,
+`npm install` the resulting tarball into a clean directory **outside this
+repo**, and the installed `node_modules/.bin/audience-connector` runs the full
+15-case suite with byte-for-byte the same results as the workspace build. The
+`__tests__/cli-packaging.test.ts` guard keeps a future `files`/tsup change from
+silently dropping the bin from the tarball.
+
+> **Open item — registry `0.1.0` predates the CLI.** The `0.1.0` of
+> `@askdepth/audience-connector` currently on the public npm registry was
+> published at the end of P2, before the conformance CLI existed, so its
+> tarball has no `bin` — `npx @askdepth/audience-connector conformance` fetched
+> fresh from the registry fails with *"could not determine executable to
+> run"*. Closing that needs a `0.1.1` publish, which is a human release
+> decision and **not part of P3**. Until it lands, consumers install the CLI
+> from a build of this repo (or a locally packed tarball).
 
 ## Flags
 
