@@ -1,6 +1,6 @@
 {
   "name": "@askdepth/audience-contract",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Wire contract for the Askdepth Audience SDK — zod schemas, signing, version negotiation. Source published; see https://github.com/askdepth/audience-connector.",
   "license": "MIT",
   "repository": {
