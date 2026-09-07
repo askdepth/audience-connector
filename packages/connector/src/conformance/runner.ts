@@ -50,12 +50,23 @@ export interface ConformanceCaseContext {
    * behaviour against the built-in fixture attributes.
    */
   readonly filterOnlyAttributes: readonly string[];
+
+  /**
+   * Declared values for filter-only attributes, keyed by attribute name —
+   * populated from the `--filter-only-attribute <name>=<value>` form of the
+   * same repeatable flag (the bare `<name>` form leaves the name in
+   * {@link filterOnlyAttributes} but adds nothing here). P6 uses the value to
+   * send a real `attr.<name>` filter on the declared attribute; empty when the
+   * operator only supplied bare names.
+   */
+  readonly filterOnlyAttributeValues: Readonly<Record<string, string>>;
 }
 
 /** The context a case sees when the runner is given none (direct unit calls). */
 export const EMPTY_CASE_CONTEXT: ConformanceCaseContext = Object.freeze({
   unmappedColumns: Object.freeze([]) as readonly string[],
   filterOnlyAttributes: Object.freeze([]) as readonly string[],
+  filterOnlyAttributeValues: Object.freeze({}) as Readonly<Record<string, string>>,
 });
 
 export interface ConformanceCase {

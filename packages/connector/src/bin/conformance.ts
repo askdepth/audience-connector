@@ -9,7 +9,12 @@
 //   1  at least one conformance case failed
 //   2  runner error: missing/invalid arg, malformed URL, unreachable connector
 
-import { createConformanceClient, ConnectionError } from '../conformance/client';
+import {
+  createConformanceClient,
+  ConnectionError,
+  redactUrl,
+  redactUrlsInText,
+} from '../conformance/client';
 import { CONFORMANCE_CASES, RunnerError, runConformance } from '../conformance/runner';
 import { renderHuman, renderJson } from '../conformance/report';
 
@@ -19,17 +24,20 @@ Runs the Askdepth Audience SDK conformance suite against a deployed connector.
 
 Required:
   --url <url>              Base URL of the connector (http/https)
-  --secret <secret>        Active signing secret
+  --secret <secret>        Active signing secret (or set ASKDEPTH_SECRET)
 
 Options:
-  --previous-secret <s>    Previous signing secret (rotation overlap)
+  --previous-secret <s>    Previous signing secret (rotation overlap; or set
+                           ASKDEPTH_PREVIOUS_SECRET)
   --case <id>              Run only this case id (repeatable)
   --unmapped-column <name> A store column that exists but is intentionally not
                            mapped, and must appear in no response (repeatable).
                            Used by case N3.
-  --filter-only-attribute <name>
+  --filter-only-attribute <name>[=<value>]
                            An attribute usable in attr.* criteria but never
                            projected into a row payload (not returnable).
+                           With =<value>, P6 sends a real attr.<name> filter on
+                           it; bare <name> keeps P6's structural check.
                            Used by case P6 (repeatable).
   --json                   Emit machine-readable JSON instead of a table
   --timeout-ms <n>         Per-case timeout in milliseconds (default 5000)
@@ -44,6 +52,7 @@ interface ParsedArgs {
   cases: string[];
   unmappedColumns: string[];
   filterOnlyAttributes: string[];
+  filterOnlyAttributeValues: Record<string, string>;
   json: boolean;
   timeoutMs: number;
 }
@@ -59,6 +68,7 @@ export function parseArgs(argv: string[]): ParsedArgs | { help: true } {
   const cases: string[] = [];
   const unmappedColumns: string[] = [];
   const filterOnlyAttributes: string[] = [];
+  const filterOnlyAttributeValues: Record<string, string> = {};
   let json = false;
   let timeoutMs = 5000;
 
@@ -104,10 +114,21 @@ export function parseArgs(argv: string[]): ParsedArgs | { help: true } {
         unmappedColumns.push(inline ?? valueAfter(i, '--unmapped-column'));
         if (inline === undefined) i++;
         break;
-      case '--filter-only-attribute':
-        filterOnlyAttributes.push(inline ?? valueAfter(i, '--filter-only-attribute'));
+      case '--filter-only-attribute': {
+        const raw = inline ?? valueAfter(i, '--filter-only-attribute');
         if (inline === undefined) i++;
+        const eq = raw.indexOf('=');
+        if (eq >= 0) {
+          // `<name>=<value>` — the name still joins the list; the value is
+          // recorded for P6 to send a real attr.<name> filter.
+          const name = raw.slice(0, eq);
+          filterOnlyAttributes.push(name);
+          filterOnlyAttributeValues[name] = raw.slice(eq + 1);
+        } else {
+          filterOnlyAttributes.push(raw);
+        }
         break;
+      }
       case '--timeout-ms': {
         const raw = inline ?? valueAfter(i, '--timeout-ms');
         if (inline === undefined) i++;
@@ -126,9 +147,26 @@ export function parseArgs(argv: string[]): ParsedArgs | { help: true } {
     }
   }
 
+  // `--secret` on argv wins; otherwise fall back to the environment so the
+  // signing secret need not appear in a process listing or shell history.
+  secret = secret ?? process.env.ASKDEPTH_SECRET;
+  previousSecret = previousSecret ?? process.env.ASKDEPTH_PREVIOUS_SECRET;
+
   if (!url) throw new UsageError('error: --url is required');
-  if (!secret) throw new UsageError('error: --secret is required');
-  return { url, secret, previousSecret, cases, unmappedColumns, filterOnlyAttributes, json, timeoutMs };
+  if (!secret) {
+    throw new UsageError('error: --secret is required (pass --secret or set ASKDEPTH_SECRET)');
+  }
+  return {
+    url,
+    secret,
+    previousSecret,
+    cases,
+    unmappedColumns,
+    filterOnlyAttributes,
+    filterOnlyAttributeValues,
+    json,
+    timeoutMs,
+  };
 }
 
 function describeConnectionError(err: ConnectionError): string {
@@ -145,7 +183,8 @@ function describeConnectionError(err: ConnectionError): string {
   if (names.includes('TimeoutError') || names.includes('AbortError')) return 'connection timed out';
   if (codes.length > 0) return String(codes[0]);
   const msg = (chain[chain.length - 1] as { message?: string })?.message;
-  return msg ? msg : 'unreachable';
+  // A forwarded fetch error can echo the raw (possibly credentialed) URL.
+  return msg ? redactUrlsInText(msg) : 'unreachable';
 }
 
 export interface CliIO {
@@ -179,7 +218,7 @@ export async function main(argv: string[], io: CliIO = defaultIO): Promise<numbe
       throw new Error('protocol must be http or https');
     }
   } catch {
-    io.err(`error: --url is not a valid http(s) URL: ${parsed.url}\n`);
+    io.err(`error: --url is not a valid http(s) URL: ${redactUrl(parsed.url)}\n`);
     return 2;
   }
 
@@ -196,7 +235,7 @@ export async function main(argv: string[], io: CliIO = defaultIO): Promise<numbe
     await client.get('/health');
   } catch (err) {
     if (err instanceof ConnectionError) {
-      io.err(`error: could not connect to ${parsed.url}: ${describeConnectionError(err)}\n`);
+      io.err(`error: could not connect to ${redactUrl(parsed.url)}: ${describeConnectionError(err)}\n`);
       return 2;
     }
     io.err(`error: preflight failed: ${err instanceof Error ? err.message : String(err)}\n`);
@@ -206,12 +245,15 @@ export async function main(argv: string[], io: CliIO = defaultIO): Promise<numbe
   let summary;
   try {
     summary = await runConformance(client, CONFORMANCE_CASES, {
-      url: parsed.url,
+      // Redacted here so `RunSummary.url` (and every report rendered from it)
+      // carries no `user:password@` credentials.
+      url: redactUrl(parsed.url),
       timeoutMs: parsed.timeoutMs,
       only: parsed.cases,
       context: {
         unmappedColumns: parsed.unmappedColumns,
         filterOnlyAttributes: parsed.filterOnlyAttributes,
+        filterOnlyAttributeValues: parsed.filterOnlyAttributeValues,
       },
     });
   } catch (err) {

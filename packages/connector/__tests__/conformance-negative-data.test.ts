@@ -41,8 +41,13 @@ const byId = (id: string): ConformanceCase => {
 const WITH_UNMAPPED: ConformanceCaseContext = {
   unmappedColumns: [...UNMAPPED_COLUMNS],
   filterOnlyAttributes: [],
+  filterOnlyAttributeValues: {},
 };
-const NO_CONTEXT: ConformanceCaseContext = { unmappedColumns: [], filterOnlyAttributes: [] };
+const NO_CONTEXT: ConformanceCaseContext = {
+  unmappedColumns: [],
+  filterOnlyAttributes: [],
+  filterOnlyAttributeValues: {},
+};
 
 /**
  * Pin `generateSeed()` (the only `crypto.getRandomValues` caller) to a fixed

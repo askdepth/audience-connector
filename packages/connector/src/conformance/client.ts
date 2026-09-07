@@ -49,12 +49,100 @@ function joinUrl(base: string, path: string): string {
   return b + p;
 }
 
+/**
+ * Strip any `user:password@` credentials from a URL before it goes anywhere a
+ * human (a log line, an error message, the `--json` report) will read it.
+ * Parses with `new URL`, blanks `username`/`password`, and returns the
+ * round-tripped string. On a parse failure the input is returned unchanged —
+ * redaction is best-effort, never a reason to throw.
+ */
+export function redactUrl(raw: string): string {
+  try {
+    const u = new URL(raw);
+    u.username = '';
+    u.password = '';
+    return u.toString();
+  } catch {
+    return raw;
+  }
+}
+
+/**
+ * Blank `user:password@` credentials out of every `scheme://…@host` URL that
+ * appears **inside** a larger string — an error message, a log line. `fetch`
+ * itself rejects a credentialed URL with a `TypeError` that echoes the raw URL
+ * back, so a message forwarded from a failed request can carry a secret even
+ * when the URL was never logged directly.
+ */
+export function redactUrlsInText(text: string): string {
+  // scheme:// … up to the last '@' before the next '/', '?', '#' or whitespace.
+  return text.replace(/([a-z][a-z0-9+.-]*:\/\/)[^/?#\s]*@/gi, '$1');
+}
+
+/** Default ceiling on how many bytes of a response body the client will read. */
+const DEFAULT_MAX_BODY_BYTES = 10 * 1024 * 1024;
+
+/**
+ * Read `res.body` into a string, stopping after `maxBytes`. A hostile connector
+ * that streams gigabytes must not be able to OOM the CLI, so the read is
+ * bounded rather than `await res.text()`. Returns the (possibly truncated)
+ * decoded prefix and whether truncation occurred. A null body (HEAD, 204)
+ * yields the empty string.
+ */
+async function readBoundedBody(
+  res: Response,
+  maxBytes: number,
+): Promise<{ text: string; truncated: boolean }> {
+  const body = res.body;
+  if (!body) return { text: '', truncated: false };
+
+  const reader = body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  let truncated = false;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value || value.byteLength === 0) continue;
+      if (total + value.byteLength > maxBytes) {
+        chunks.push(value.subarray(0, maxBytes - total));
+        total = maxBytes;
+        truncated = true;
+        break;
+      }
+      chunks.push(value);
+      total += value.byteLength;
+    }
+  } finally {
+    // Abandon the rest of the stream; the connection is not reused.
+    try {
+      await reader.cancel();
+    } catch {
+      /* stream already closed — nothing to do */
+    }
+  }
+
+  const combined = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    combined.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return { text: new TextDecoder().decode(combined), truncated };
+}
+
 /** A read response, with the body already drained to a string. */
 export interface WireResponse {
   status: number;
   ok: boolean;
   headers: Headers;
   bodyText: string;
+  /**
+   * True when the response body exceeded `maxBodyBytes` and `bodyText` holds
+   * only the truncated prefix. `false` for every body read in full.
+   */
+  truncated: boolean;
   /** Parse `bodyText` as JSON. Throws if the body is not JSON. */
   json<T = unknown>(): T;
 }
@@ -64,8 +152,9 @@ export class ConnectionError extends Error {
   readonly url: string;
   override readonly cause: unknown;
   constructor(url: string, cause: unknown) {
-    super(`could not reach ${url}`);
+    super(`could not reach ${redactUrl(url)}`);
     this.name = 'ConnectionError';
+    // Raw URL kept on the instance for programmatic use; only the message is redacted.
     this.url = url;
     this.cause = cause;
   }
@@ -79,6 +168,13 @@ export interface ConformanceClient {
   post(path: string, body: unknown): Promise<WireResponse>;
   /** GET with **no** signature or timestamp header at all. */
   getUnsigned(path: string): Promise<WireResponse>;
+  /**
+   * POST with a JSON body and `content-type: application/json` but **no**
+   * `x-askdepth-signature` / `x-askdepth-timestamp` header at all — the write
+   * analogue of {@link getUnsigned}. N1 uses it to prove a connector rejects an
+   * unsigned request to the *data* endpoints, not only to GET routes.
+   */
+  postUnsigned(path: string, body: unknown): Promise<WireResponse>;
   /** POST whose signature header is well-formed (`v1=<64 hex>`) but does not verify. */
   postWithBadSignature(path: string, body: unknown): Promise<WireResponse>;
   /**
@@ -107,6 +203,12 @@ export interface ConformanceClientOptions {
   previousSecret?: string;
   /** Per-request timeout in ms. Default 5000. */
   timeoutMs?: number;
+  /**
+   * Ceiling on how many bytes of a response body to read. On overflow the read
+   * stops, `WireResponse.bodyText` holds the truncated prefix, and
+   * `WireResponse.truncated` is `true`. Default 10 MiB.
+   */
+  maxBodyBytes?: number;
   /** Test seam: replaces global `fetch`. */
   fetchImpl?: typeof fetch;
   /** Test seam: current time in ms. Default `Date.now`. */
@@ -116,6 +218,7 @@ export interface ConformanceClientOptions {
 export function createConformanceClient(options: ConformanceClientOptions): ConformanceClient {
   const { url, secret } = options;
   const timeoutMs = options.timeoutMs ?? 5000;
+  const maxBodyBytes = options.maxBodyBytes ?? DEFAULT_MAX_BODY_BYTES;
   const fetchImpl = options.fetchImpl ?? fetch;
   const now = options.now ?? Date.now;
   const secretBuf = Buffer.from(secret, 'utf8');
@@ -135,21 +238,31 @@ export function createConformanceClient(options: ConformanceClientOptions): Conf
     const target = joinUrl(url, path);
     let res: Response;
     try {
-      res = await fetchImpl(target, { method, headers, body, signal: AbortSignal.timeout(timeoutMs) });
+      res = await fetchImpl(target, {
+        method,
+        headers,
+        body,
+        // Never follow a 3xx: it would replay the signed request / auth headers
+        // to another host, and N8 needs to observe a redirect as an "answered"
+        // write path rather than transparently chasing it.
+        redirect: 'manual',
+        signal: AbortSignal.timeout(timeoutMs),
+      });
     } catch (err) {
       throw new ConnectionError(target, err);
     }
-    const bodyText = await res.text();
+    const { text: bodyText, truncated } = await readBoundedBody(res, maxBodyBytes);
     return {
       status: res.status,
       ok: res.ok,
       headers: res.headers,
       bodyText,
+      truncated,
       json<T = unknown>(): T {
         try {
           return JSON.parse(bodyText) as T;
         } catch {
-          throw new Error(`response body from ${target} is not JSON`);
+          throw new Error(`response body from ${redactUrl(target)} is not JSON`);
         }
       },
     };
@@ -175,6 +288,13 @@ export function createConformanceClient(options: ConformanceClientOptions): Conf
       // Deliberately empty: no signature, no timestamp. The connector — not
       // this client — is responsible for rejecting it.
       return send('GET', path, new Headers(), undefined);
+    },
+
+    postUnsigned(path, body) {
+      // A real JSON POST body, but — like `getUnsigned` — no signature and no
+      // timestamp header. Rejecting it is the connector's job.
+      const raw = JSON.stringify(body ?? {});
+      return send('POST', path, new Headers({ 'content-type': 'application/json' }), raw);
     },
 
     postWithBadSignature(path, body) {

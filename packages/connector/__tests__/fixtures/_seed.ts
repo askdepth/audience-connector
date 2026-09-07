@@ -62,6 +62,7 @@ export const UNMAPPED_COLUMNS = ['internal_notes', 'secret_note'] as const;
 export const WITH_UNMAPPED: ConformanceCaseContext = {
   unmappedColumns: [...UNMAPPED_COLUMNS],
   filterOnlyAttributes: [],
+  filterOnlyAttributeValues: {},
 };
 
 export const SEED_ROW_COUNT = 900;

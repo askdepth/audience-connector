@@ -40,7 +40,7 @@ describe('S5 — N3 does not fail on a declared column that appears only in /sch
   });
 
   it('still fails structurally with no out-of-band list (data-only row-key check kept)', async () => {
-    const r = await n3.run(createLeakyColumnsClient(), { unmappedColumns: [], filterOnlyAttributes: [] });
+    const r = await n3.run(createLeakyColumnsClient(), { unmappedColumns: [], filterOnlyAttributes: [], filterOnlyAttributeValues: {} });
     expect(r).toMatchObject({ id: 'N3', pass: false });
     expect(r.detail).toContain('internal_notes');
   });

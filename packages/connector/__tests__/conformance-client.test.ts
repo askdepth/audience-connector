@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import { verify } from '@askdepth/audience-contract';
-import { createConformanceClient } from '../src/conformance/client';
+import { createConformanceClient, redactUrl, redactUrlsInText } from '../src/conformance/client';
 import { startStubConnector, unreachableUrl, type StubConnector } from './_conformance-stub';
 
 const SECRET = 'conformance-client-secret';
@@ -108,5 +108,123 @@ describe('S1 conformance client — pure over-the-wire', () => {
     const dead = await unreachableUrl();
     const client = createConformanceClient({ url: dead, secret: SECRET, timeoutMs: 2000 });
     await expect(client.get('/health')).rejects.toMatchObject({ name: 'ConnectionError' });
+  });
+
+  it('postUnsigned(path, body) sends a JSON body with NO signature headers', async () => {
+    const seen: { url: string; method: string; headers: Headers; body: string }[] = [];
+    const fetchImpl: typeof fetch = async (input, init) => {
+      seen.push({
+        url: String(input),
+        method: init?.method ?? 'GET',
+        headers: new Headers(init?.headers),
+        body: String(init?.body ?? ''),
+      });
+      return new Response('{}', { status: 401, headers: { 'content-type': 'application/json' } });
+    };
+    const client = createConformanceClient({
+      url: 'http://stub.local/askdepth/v1',
+      secret: SECRET,
+      fetchImpl,
+    });
+
+    await client.postUnsigned('/candidates/count', { criteria: { all: [] }, mapping: {} });
+
+    expect(seen).toHaveLength(1);
+    expect(seen[0].method).toBe('POST');
+    expect(seen[0].url).toBe('http://stub.local/askdepth/v1/candidates/count');
+    expect(seen[0].headers.get('content-type')).toBe('application/json');
+    expect(seen[0].headers.has('x-askdepth-signature')).toBe(false);
+    expect(seen[0].headers.has('x-askdepth-timestamp')).toBe(false);
+    expect(JSON.parse(seen[0].body)).toEqual({ criteria: { all: [] }, mapping: {} });
+
+    // Contrast: the signed POST through the same client DOES carry them.
+    await client.post('/candidates/count', { criteria: { all: [] }, mapping: {} });
+    expect(seen[1].headers.get('x-askdepth-signature')).toMatch(/^v1=[0-9a-f]{64}$/);
+  });
+
+  it('send() passes redirect:"manual" and surfaces a 3xx as-is without following it', async () => {
+    const seen: { redirect?: string }[] = [];
+    const fetchImpl: typeof fetch = async (_input, init) => {
+      seen.push({ redirect: init?.redirect });
+      return new Response(null, { status: 302, headers: { location: 'https://elsewhere.example/x' } });
+    };
+    const client = createConformanceClient({ url: 'http://stub.local', secret: SECRET, fetchImpl });
+
+    const res = await client.get('/candidates/search');
+
+    expect(seen).toHaveLength(1); // did not follow the redirect
+    expect(seen[0].redirect).toBe('manual');
+    expect(res.status).toBe(302);
+    expect(res.truncated).toBe(false);
+  });
+
+  it('send() bounds the response body read at maxBodyBytes and flags truncation', async () => {
+    const huge = 'x'.repeat(5000);
+    const fetchImpl: typeof fetch = async () =>
+      new Response(huge, { status: 200, headers: { 'content-type': 'application/json' } });
+    const client = createConformanceClient({
+      url: 'http://stub.local',
+      secret: SECRET,
+      fetchImpl,
+      maxBodyBytes: 100,
+    });
+
+    const res = await client.get('/candidates/search');
+
+    expect(res.truncated).toBe(true);
+    expect(res.bodyText.length).toBeLessThanOrEqual(100);
+    expect(res.status).toBe(200);
+    // json() still works (try/caught) on the truncated, now-invalid body.
+    expect(() => res.json()).toThrow(/is not JSON/);
+  });
+
+  it('send() reads a body at or under the limit in full, truncated:false', async () => {
+    const body = JSON.stringify({ ok: true });
+    const fetchImpl: typeof fetch = async () =>
+      new Response(body, { status: 200, headers: { 'content-type': 'application/json' } });
+    const client = createConformanceClient({
+      url: 'http://stub.local',
+      secret: SECRET,
+      fetchImpl,
+      maxBodyBytes: 1024,
+    });
+
+    const res = await client.get('/health');
+
+    expect(res.truncated).toBe(false);
+    expect(res.bodyText).toBe(body);
+    expect(res.json<{ ok: boolean }>().ok).toBe(true);
+  });
+
+  it('redactUrl blanks credentials and leaves an unparseable string untouched', () => {
+    expect(redactUrl('https://user:s3cr3t@127.0.0.1:9/x')).toBe('https://127.0.0.1:9/x');
+    expect(redactUrl('https://user:s3cr3t@127.0.0.1:9/x')).not.toMatch(/user|s3cr3t/);
+    expect(redactUrl('not a url')).toBe('not a url');
+  });
+
+  it('redactUrlsInText scrubs credentials from a URL embedded in a larger string', () => {
+    const msg =
+      'Request cannot be constructed from a URL that includes credentials: https://user:s3cr3t@127.0.0.1:9/x/health';
+    const scrubbed = redactUrlsInText(msg);
+    expect(scrubbed).not.toMatch(/user|s3cr3t/);
+    expect(scrubbed).toContain('https://127.0.0.1:9/x/health');
+  });
+
+  it('ConnectionError redacts credentials in its message but keeps the raw url on the instance', async () => {
+    const dead = await unreachableUrl();
+    const withCreds = dead.replace('http://', 'http://user:s3cr3t@');
+    const client = createConformanceClient({ url: withCreds, secret: SECRET, timeoutMs: 2000 });
+
+    await client.get('/health').then(
+      () => {
+        throw new Error('expected a ConnectionError');
+      },
+      (err: unknown) => {
+        const e = err as { name: string; message: string; url: string };
+        expect(e.name).toBe('ConnectionError');
+        expect(e.message).not.toMatch(/user|s3cr3t/);
+        expect(e.url).toContain('s3cr3t'); // raw, for programmatic use
+      },
+    );
   });
 });
