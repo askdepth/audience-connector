@@ -6,6 +6,41 @@ connector. The negative cases (N1–N8) are where the value is: a runner that
 passes everything is worse than none, because it turns an untested integration
 into a certified one.
 
+**It is a blocking gate.** In the P6 activation wizard (step 7) a connector
+does not activate without a clean conformance run — every one of the 15 cases
+passing. There is no skip, no warn-only mode, and no bypass flag; a single
+failing case blocks activation.
+
+## Case list
+
+The suite runs 15 cases — 7 positive (`P1`–`P7`, the "a connector must pass, to
+activate" list) and 8 negative (`N1`–`N8`, the "a connector fails if it…"
+list), both in [`conformance-spec.md`](./conformance-spec.md) order.
+
+### Positive — a connector must pass all of these
+
+| id | case |
+|---|---|
+| P1 | `GET /health` returns 200 with a valid `HealthResponseSchema` body. |
+| P2 | `GET /schema` returns `columns` (postgres) or the hand-declared schema (rest). |
+| P3 | `POST /candidates/count` returns a non-negative integer for a valid query. |
+| P4 | `POST /candidates/search` respects `limit` and returns a `cursor` when more rows exist. |
+| P5 | `externalId IN [...]` criteria return the correct intersection. |
+| P6 | Attribute filters (`attr.*`) filter without the attribute appearing in the response, unless separately mapped for display (§4.3). |
+| P7 | `suppressExternalIds` excludes the named ids from results. |
+
+### Negative — a connector fails if it does any of these
+
+The one-line statement of each negative case, its deliberately-broken fixture,
+and the exact violation that fixture commits are in the
+[**Negative case → broken fixture**](#negative-case--broken-fixture) table
+below. In short: N1 answers an unsigned request; N2 answers a request with an
+expired or malformed signature; N3 returns unmapped columns; N4 leaks
+credentials or row data in an error response; N5 returns non-deterministic
+cursor pagination; N6 exceeds the 1,000-row result cap; N7 returns a
+non-random subsample when `randomSample` is advertised; N8 exposes any write
+path.
+
 ## Getting the CLI
 
 The runner ships **inside the `@askdepth/audience-connector` package** as a
@@ -51,7 +86,41 @@ violation its name says and is otherwise fully correct.
 `__tests__/conformance-meta-check.test.ts` runs the full 15-case suite against
 each fixture and asserts that **only** the named case fails.
 
-This page will be expanded in S10. For now it is the case → fixture map.
+## `--json` output shape (for CI)
+
+With `--json` the runner writes a single JSON object to stdout:
+
+```jsonc
+{
+  "url": "https://connector.example.com/askdepth/v1",
+  "cases": [
+    { "id": "P1", "pass": true },
+    { "id": "N4", "pass": false, "detail": "DSN fragment observed in error body" }
+    // …one entry per case run, in suite order
+  ],
+  "passed": 14,
+  "failed": 1
+}
+```
+
+- `url` — the `--url` the run targeted.
+- `cases` — one `{ id, pass, detail? }` per case actually run (all 15 by
+  default; only the `--case` ids when that flag is given). `detail` is present
+  on a failure and on some passes that carry a note; treat it as human-readable
+  text, not a stable field.
+- `passed` / `failed` — counts over `cases`.
+
+**Exit codes:**
+
+| code | meaning |
+|---|---|
+| `0` | every case run passed |
+| `1` | at least one case failed (a real conformance failure) |
+| `2` | runner error — bad or non-http(s) `--url`, connector unreachable, unknown `--case` id, malformed flag |
+
+CI must branch on the **exit code**, not parse stdout. Exit `2` is an
+infrastructure problem (the run never produced a verdict); exit `1` is the
+connector failing conformance. Only exit `0` is a pass.
 
 ## Negative case → broken fixture
 
@@ -72,9 +141,26 @@ The shared seeded base for these fixtures is
 returnable `attr.tier`, and two columns (`internal_notes`, `secret_note`) that
 exist in the data but are not mapped.
 
+### N7 is a statistical assertion — allow one retry in CI
+
+N7 does not check a single response. It advertises `randomSample`, draws a
+subsample repeatedly, and checks that the **mean percentile of a monotonic
+field (`signupAt`) across the draws falls inside a band around 0.5** — a
+non-random connector that returns, say, the oldest N rows lands far outside it.
+
+The suite's own CI is deterministic: it pins the sampling RNG, so N7 is a
+fixed pass/fail there. Run against a **live** connector the draws are genuinely
+random, so a correct connector will occasionally produce a run whose mean lands
+just outside the band by chance. CI that runs the suite against a real
+connector should **allow exactly one retry for N7 specifically** (e.g.
+`--case N7` re-run on a first N7 failure) before treating it as a real failure.
+Do not blanket-retry the whole suite — the other 14 cases are deterministic and
+a retry there would only mask a real regression.
+
 ## Positive cases
 
 `health`, `schema`, `count`, `search`, `externalId IN`, attribute filters,
-`suppressExternalIds` (P1–P7). They prove the happy path against the correct
-reference fixture (`referenceClient()` in `_seed.ts`); necessary but not
-sufficient — the negative cases above are the point.
+`suppressExternalIds` (P1–P7 — full one-liners in the [case list](#case-list)
+above). They prove the happy path against the correct reference fixture
+(`referenceClient()` in `_seed.ts`); necessary but not sufficient — the
+negative cases above are the point.

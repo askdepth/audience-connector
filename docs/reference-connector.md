@@ -150,17 +150,47 @@ data-leak case at.
   `packages/reference-connector/__tests__/entrypoints.test.ts` is a drift guard:
   it fails if those CI commands change without this doc being updated.
 
-## 5. Demo framing
+## 5. For a demo
 
-Point the conformance CLI (or, later, the platform) at a running variant and
-walk the 15 cases. What to show:
+The reference connector is the **M2 deliverable**: a working, demonstrable
+connector that sales can show *now*, without waiting for any platform UI. Point
+the conformance CLI at a running variant and walk it live.
 
-- It is a **real connector** — the same `@askdepth/audience-connector` a client
-  deploys, the same signature verification, the same adapter.
-- The data is **synthetic and deterministic** — every email is `@example.com`,
-  every `externalId` is `ref-NNNNN`, and the same seed produces byte-identical
-  rows on every run. Nothing here is a real person.
-- Both variants answer identically, so the story is "your connector, your
-  backend" — Postgres or your own service — not "our database".
+### What it actually is
 
-(S10 expands this section.)
+- A **real connector instance**, not a mock and not a stub. It is the same
+  `@askdepth/audience-connector` package a client deploys, wired to a real
+  adapter (`postgresAdapter` or `restAdapter`), doing real HMAC-SHA256
+  signature verification through the real framework shim. There is no
+  demo-only code path — what the audience sees is what a client ships.
+- The seed is **synthetic and deterministic**: 5,000 SaaS-shaped users spread
+  over roughly 18 months of signups, every email `user-NNNNN@example.com`,
+  every `externalId` `ref-NNNNN`. The same seed produces byte-identical rows on
+  every run, on every machine. Nothing here is or resembles a real person, so
+  it is safe to show on a shared screen.
+
+### What to show
+
+1. **A signed round-trip.** Run `POST /candidates/count` and
+   `POST /candidates/search` through the conformance CLI (or `curl` with a
+   signed header). Unsigned or stale-signature requests are rejected — that is
+   cases N1/N2 passing, live.
+2. **The schema.** `GET /schema` returns the connector's declared columns and
+   attributes — the platform learns the shape by asking, not by configuration.
+3. **Unmapped columns never leak.** `internal_notes` and `crm_account_id` exist
+   in every backing row and show up in `GET /schema`, but never appear in a
+   `/candidates/search` row or a `/candidates/count` body. That is case N3
+   passing against real data.
+4. **Same queries, both variants, same answers.** Run the identical query set
+   against the `postgres` variant (`:8787`) and the `rest` variant (`:8788`).
+   The response shapes and row counts match. The story is "your connector, your
+   backend — Postgres or your own service", not "our database": the connector's
+   behaviour is a property of the SDK and the field mapping, not of one
+   backend.
+5. **The full gate.** Run all 15 conformance cases against the running variant
+   and show a clean pass — the same gate a client's connector must clear in the
+   P6 activation wizard before it can point at production.
+
+The `rest` variant needs no database (`pnpm --filter
+@askdepth/reference-connector demo:rest`), so it is the fastest thing to bring
+up on a laptop for a demo.
