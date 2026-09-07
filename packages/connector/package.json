@@ -38,6 +38,7 @@
     },
     "./package.json": "./package.json"
   },
+  "bin": { "audience-connector": "dist/bin/conformance.js" },
   "files": ["dist"],
   "publishConfig": { "access": "public" },
   "scripts": {
