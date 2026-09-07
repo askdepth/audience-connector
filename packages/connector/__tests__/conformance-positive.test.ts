@@ -7,7 +7,7 @@
 // Plus: `--case` selection still works with a populated registry, and an
 // unknown id is still exit 2 (not a silent no-op).
 
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import { CONFORMANCE_CASES, runConformance } from '../src/conformance/runner';
 import type { ConformanceCase } from '../src/conformance/runner';
 import { main } from '../src/bin/conformance';
@@ -27,11 +27,12 @@ const byId = (id: string): ConformanceCase => {
 
 const ALL_IDS = ['P1', 'P2', 'P3', 'P4', 'P5', 'P6', 'P7'] as const;
 
-// S3 wired the four wire-provable negative cases after the positives.
-const NEGATIVE_IDS = ['N1', 'N2', 'N4', 'N8'] as const;
+// S3 wired the four wire-provable negatives; S4 added the seeded-data ones.
+// The registry is now the full 15 in spec order.
+const NEGATIVE_IDS = ['N1', 'N2', 'N3', 'N4', 'N5', 'N6', 'N7', 'N8'] as const;
 
 describe('S2 — registry shape', () => {
-  it('holds P1–P7 then N1,N2,N4,N8, in spec order, with matching kinds', () => {
+  it('holds P1–P7 then N1–N8, in spec order, with matching kinds', () => {
     expect(CONFORMANCE_CASES.map((c) => c.id)).toEqual([...ALL_IDS, ...NEGATIVE_IDS]);
     const kind = Object.fromEntries(CONFORMANCE_CASES.map((c) => [c.id, c.kind]));
     for (const id of ALL_IDS) expect(kind[id]).toBe('positive');
@@ -110,12 +111,24 @@ describe('S2 — case selection with a populated registry', () => {
     expect(summary.failed).toBe(0);
   });
 
-  it('runConformance with no filter runs the whole registry (P1–P7 + N1,N2,N4,N8)', async () => {
+  it('runConformance with no filter runs the whole registry (P1–P7 + N1–N8)', async () => {
+    // N7 is statistical; pin the per-pull shuffle seed so this stays green.
+    const fills = [0x11, 0x9a, 0xde, 0x0f, 0xca, 0x37, 0x5b, 0xe2];
+    let n = 0;
+    vi.spyOn(globalThis.crypto, 'getRandomValues').mockImplementation(((arr: ArrayBufferView) => {
+      const u = new Uint8Array(arr.buffer, arr.byteOffset, arr.byteLength);
+      const f = fills[n++ % fills.length];
+      for (let k = 0; k < u.length; k++) u[k] = (f + k * 31) & 0xff;
+      return arr;
+    }) as typeof crypto.getRandomValues);
+
     const summary = await runConformance(correctClient(), CONFORMANCE_CASES, {
       url: 'http://connector.fixture/askdepth/v1',
-      timeoutMs: 5000,
+      timeoutMs: 20000,
     });
+    vi.restoreAllMocks();
     expect(summary.cases.map((c) => c.id)).toEqual([...ALL_IDS, ...NEGATIVE_IDS]);
+    expect(summary.cases.filter((c) => !c.pass).map((c) => `${c.id}: ${c.detail}`)).toEqual([]);
     expect(summary.failed).toBe(0);
   });
 });

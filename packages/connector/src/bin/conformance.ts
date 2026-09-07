@@ -24,6 +24,9 @@ Required:
 Options:
   --previous-secret <s>    Previous signing secret (rotation overlap)
   --case <id>              Run only this case id (repeatable)
+  --unmapped-column <name> A store column that exists but is intentionally not
+                           mapped, and must appear in no response (repeatable).
+                           Used by case N3.
   --json                   Emit machine-readable JSON instead of a table
   --timeout-ms <n>         Per-case timeout in milliseconds (default 5000)
   -h, --help               Show this help
@@ -35,6 +38,7 @@ interface ParsedArgs {
   secret: string;
   previousSecret?: string;
   cases: string[];
+  unmappedColumns: string[];
   json: boolean;
   timeoutMs: number;
 }
@@ -48,6 +52,7 @@ export function parseArgs(argv: string[]): ParsedArgs | { help: true } {
   let secret: string | undefined;
   let previousSecret: string | undefined;
   const cases: string[] = [];
+  const unmappedColumns: string[] = [];
   let json = false;
   let timeoutMs = 5000;
 
@@ -89,6 +94,10 @@ export function parseArgs(argv: string[]): ParsedArgs | { help: true } {
         cases.push(inline ?? valueAfter(i, '--case'));
         if (inline === undefined) i++;
         break;
+      case '--unmapped-column':
+        unmappedColumns.push(inline ?? valueAfter(i, '--unmapped-column'));
+        if (inline === undefined) i++;
+        break;
       case '--timeout-ms': {
         const raw = inline ?? valueAfter(i, '--timeout-ms');
         if (inline === undefined) i++;
@@ -109,7 +118,7 @@ export function parseArgs(argv: string[]): ParsedArgs | { help: true } {
 
   if (!url) throw new UsageError('error: --url is required');
   if (!secret) throw new UsageError('error: --secret is required');
-  return { url, secret, previousSecret, cases, json, timeoutMs };
+  return { url, secret, previousSecret, cases, unmappedColumns, json, timeoutMs };
 }
 
 function describeConnectionError(err: ConnectionError): string {
@@ -190,6 +199,7 @@ export async function main(argv: string[], io: CliIO = defaultIO): Promise<numbe
       url: parsed.url,
       timeoutMs: parsed.timeoutMs,
       only: parsed.cases,
+      context: { unmappedColumns: parsed.unmappedColumns },
     });
   } catch (err) {
     if (err instanceof RunnerError) {

@@ -251,13 +251,13 @@ describe('S3 — populated registry still honours --case selection', () => {
     ).rejects.toBeInstanceOf(RunnerError);
   });
 
-  it('N3 (a real spec id, not yet wired — lands in S4) is still unknown to the runner', async () => {
-    await expect(
-      runConformance(correctClient(), CONFORMANCE_CASES, {
-        url: BASE_URL,
-        timeoutMs: 5000,
-        only: ['N3'],
-      }),
-    ).rejects.toBeInstanceOf(RunnerError);
+  it('N3 is now wired (S4) — --case N3 selects it and it runs', async () => {
+    const summary = await runConformance(correctClient(), CONFORMANCE_CASES, {
+      url: BASE_URL,
+      timeoutMs: 5000,
+      only: ['N3'],
+    });
+    expect(summary.cases.map((c) => c.id)).toEqual(['N3']);
+    expect(summary.cases[0]).toMatchObject({ id: 'N3', pass: true });
   });
 });
