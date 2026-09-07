@@ -27,6 +27,10 @@ Options:
   --unmapped-column <name> A store column that exists but is intentionally not
                            mapped, and must appear in no response (repeatable).
                            Used by case N3.
+  --filter-only-attribute <name>
+                           An attribute usable in attr.* criteria but never
+                           projected into a row payload (not returnable).
+                           Used by case P6 (repeatable).
   --json                   Emit machine-readable JSON instead of a table
   --timeout-ms <n>         Per-case timeout in milliseconds (default 5000)
   -h, --help               Show this help
@@ -39,6 +43,7 @@ interface ParsedArgs {
   previousSecret?: string;
   cases: string[];
   unmappedColumns: string[];
+  filterOnlyAttributes: string[];
   json: boolean;
   timeoutMs: number;
 }
@@ -53,6 +58,7 @@ export function parseArgs(argv: string[]): ParsedArgs | { help: true } {
   let previousSecret: string | undefined;
   const cases: string[] = [];
   const unmappedColumns: string[] = [];
+  const filterOnlyAttributes: string[] = [];
   let json = false;
   let timeoutMs = 5000;
 
@@ -98,6 +104,10 @@ export function parseArgs(argv: string[]): ParsedArgs | { help: true } {
         unmappedColumns.push(inline ?? valueAfter(i, '--unmapped-column'));
         if (inline === undefined) i++;
         break;
+      case '--filter-only-attribute':
+        filterOnlyAttributes.push(inline ?? valueAfter(i, '--filter-only-attribute'));
+        if (inline === undefined) i++;
+        break;
       case '--timeout-ms': {
         const raw = inline ?? valueAfter(i, '--timeout-ms');
         if (inline === undefined) i++;
@@ -118,7 +128,7 @@ export function parseArgs(argv: string[]): ParsedArgs | { help: true } {
 
   if (!url) throw new UsageError('error: --url is required');
   if (!secret) throw new UsageError('error: --secret is required');
-  return { url, secret, previousSecret, cases, unmappedColumns, json, timeoutMs };
+  return { url, secret, previousSecret, cases, unmappedColumns, filterOnlyAttributes, json, timeoutMs };
 }
 
 function describeConnectionError(err: ConnectionError): string {
@@ -199,7 +209,10 @@ export async function main(argv: string[], io: CliIO = defaultIO): Promise<numbe
       url: parsed.url,
       timeoutMs: parsed.timeoutMs,
       only: parsed.cases,
-      context: { unmappedColumns: parsed.unmappedColumns },
+      context: {
+        unmappedColumns: parsed.unmappedColumns,
+        filterOnlyAttributes: parsed.filterOnlyAttributes,
+      },
     });
   } catch (err) {
     if (err instanceof RunnerError) {

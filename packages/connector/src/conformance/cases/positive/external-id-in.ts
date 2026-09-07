@@ -12,13 +12,18 @@ import { STANDARD_MAPPING, formatIssues, readJson, statusDetail } from './_share
 
 const ABSENT_ID = '__conformance_absent_id__';
 
+// Bounded on purpose: P5 only needs a few real ids to build an intersection,
+// and pulling the whole "everyone" set would (a) assume it fits under the cap
+// and (b) collide with N6's at-cap probe shape when the mapping is identity.
+const ID_DISCOVERY_LIMIT = 5;
+
 async function idsFromUnfilteredSearch(
   client: ConformanceClient,
 ): Promise<{ ok: true; ids: string[] } | { ok: false; detail: string }> {
   const res = await client.post('/candidates/search', {
     criteria: { all: [] },
     mapping: STANDARD_MAPPING,
-    limit: 1000,
+    limit: ID_DISCOVERY_LIMIT,
   });
   if (res.status !== 200) return { ok: false, detail: statusDetail(res) };
   const parsed = readJson(res);

@@ -38,8 +38,11 @@ const byId = (id: string): ConformanceCase => {
   return c;
 };
 
-const WITH_UNMAPPED: ConformanceCaseContext = { unmappedColumns: [...UNMAPPED_COLUMNS] };
-const NO_CONTEXT: ConformanceCaseContext = { unmappedColumns: [] };
+const WITH_UNMAPPED: ConformanceCaseContext = {
+  unmappedColumns: [...UNMAPPED_COLUMNS],
+  filterOnlyAttributes: [],
+};
+const NO_CONTEXT: ConformanceCaseContext = { unmappedColumns: [], filterOnlyAttributes: [] };
 
 /**
  * Pin `generateSeed()` (the only `crypto.getRandomValues` caller) to a fixed
@@ -228,6 +231,19 @@ describe('S4 — CLI wiring', () => {
     expect('help' in parsed).toBe(false);
     if ('help' in parsed) throw new Error('unreachable');
     expect(parsed.unmappedColumns).toEqual(['internal_notes', 'secret_note']);
+  });
+
+  it('parseArgs collects repeatable --filter-only-attribute', () => {
+    const parsed = parseArgs([
+      '--url', 'https://c.example/askdepth/v1',
+      '--secret', 's',
+      '--filter-only-attribute', 'country',
+      '--filter-only-attribute', 'region',
+    ]);
+    expect('help' in parsed).toBe(false);
+    if ('help' in parsed) throw new Error('unreachable');
+    expect(parsed.filterOnlyAttributes).toEqual(['country', 'region']);
+    expect(parsed.unmappedColumns).toEqual([]);
   });
 
   it('--case N3 --case N7 --unmapped-column internal_notes selects exactly those two', async () => {

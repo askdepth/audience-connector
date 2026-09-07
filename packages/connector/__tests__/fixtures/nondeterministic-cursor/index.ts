@@ -26,6 +26,16 @@ export function createNondeterministicCursorClient(): ConformanceClient {
   const adapter: Adapter = {
     ...base,
     async search(plan: QueryPlan, ctx) {
+      // A bounded `externalId IN (…)` lookup is answered verbatim — a connector
+      // that scans broad result sets with an unstable `ORDER BY` can still
+      // return an explicitly-enumerated id list deterministically. N5 probes
+      // pagination over an *unfiltered* scan, so this does not weaken it; it
+      // just keeps P4's bounded pinned-set pagination (which is not what N5 is
+      // about) from tripping on the same fixture.
+      if (plan.filters.some((f) => f.canonical === 'externalId')) {
+        return base.search(plan, ctx);
+      }
+
       // Borrow the reference page only for its has-more signal / cursor token.
       const real = await base.search(plan, ctx);
 

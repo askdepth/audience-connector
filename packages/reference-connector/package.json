@@ -12,14 +12,18 @@
     "build": "true",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "seed:generate": "tsx seed/generate.ts"
+    "seed:generate": "tsx seed/generate.ts",
+    "start:postgres": "tsx src/postgres-variant.ts",
+    "demo:postgres": "tsx scripts/demo-postgres.ts"
   },
   "dependencies": {
     "@askdepth/audience-connector": "workspace:*",
     "@askdepth/audience-contract": "workspace:*",
+    "express": "^5.0.1",
     "pg": "^8.13.1"
   },
   "devDependencies": {
+    "@types/express": "^5.0.0",
     "@types/node": "^22.10.2",
     "@types/pg": "^8.11.10",
     "tsx": "^4.19.2",

@@ -53,14 +53,25 @@ const CANONICAL_ROW_KEYS: ReadonlySet<string> = new Set([
 
 // A minimal mapping (identity fields only) and a display mapping (adds a couple
 // of projected columns). A connector that leaks does so under both.
+//
+// `MINIMAL_MAPPING` is the mandatory probe: `externalId` + `email` are the only
+// two canonical fields every conformant connector must map. `DISPLAY_MAPPING`
+// projects optional fields (`segment`, `signupAt`) — a conformant connector is
+// free NOT to map them and to answer `malformed_request` (HTTP 400) for that
+// projection target (`CanonicalFieldSchema` marks them `.optional()`). So the
+// display probe is *tolerant*: a 400 skips it rather than failing N3. `name` is
+// deliberately absent — the reference connector does not map it.
 const MINIMAL_MAPPING = { src_external_id: 'externalId', src_email: 'email' };
 const DISPLAY_MAPPING = {
   src_external_id: 'externalId',
   src_email: 'email',
-  src_name: 'name',
   src_segment: 'segment',
   src_signup: 'signupAt',
 };
+
+/** A tolerant probe returns this instead of a value when the connector answers
+ *  HTTP 400 for an optional-field projection it does not support. */
+const SKIPPED = Symbol('probe-skipped-optional-projection');
 
 interface SearchProbe {
   label: string;
@@ -97,17 +108,30 @@ async function schemaColumnNames(
   return { ok: true, names };
 }
 
+/** True when the connector rejected a request as malformed — the expected
+ *  answer when a mapping projects an optional canonical field it does not map. */
+function isMalformedRejection(res: WireResponse): boolean {
+  if (res.status !== 400) return false;
+  try {
+    return (res.json() as { error?: { code?: unknown } }).error?.code === 'malformed_request';
+  } catch {
+    return false;
+  }
+}
+
 async function searchProbe(
   client: ConformanceClient,
   label: string,
   mapping: Record<string, string>,
-): Promise<{ ok: true; probe: SearchProbe } | { ok: false; detail: string }> {
+  tolerant = false,
+): Promise<{ ok: true; probe: SearchProbe | typeof SKIPPED } | { ok: false; detail: string }> {
   const res = await client.post('/candidates/search', {
     criteria: { all: [] },
     mapping,
     limit: 100,
   });
   if (res.status !== 200) {
+    if (tolerant && isMalformedRejection(res)) return { ok: true, probe: SKIPPED };
     return { ok: false, detail: `${label}: expected HTTP 200, observed ${res.status}: "${res.bodyText.slice(0, 160)}"` };
   }
   let body: unknown;
@@ -127,9 +151,11 @@ async function countProbe(
   client: ConformanceClient,
   label: string,
   mapping: Record<string, string>,
-): Promise<{ ok: true; res: WireResponse } | { ok: false; detail: string }> {
+  tolerant = false,
+): Promise<{ ok: true; res: WireResponse | typeof SKIPPED } | { ok: false; detail: string }> {
   const res = await client.post('/candidates/count', { criteria: { all: [] }, mapping });
   if (res.status !== 200) {
+    if (tolerant && isMalformedRejection(res)) return { ok: true, res: SKIPPED };
     return { ok: false, detail: `${label}: expected HTTP 200, observed ${res.status}: "${res.bodyText.slice(0, 160)}"` };
   }
   return { ok: true, res };
@@ -150,12 +176,13 @@ export const unmappedColumnsLeakedCase: ConformanceCase = {
     const schemaCols = schema.names;
 
     const probes: SearchProbe[] = [];
-    for (const [label, mapping] of [
-      ['POST /candidates/search (identity mapping)', MINIMAL_MAPPING],
-      ['POST /candidates/search (display mapping)', DISPLAY_MAPPING],
+    for (const [label, mapping, tolerant] of [
+      ['POST /candidates/search (identity mapping)', MINIMAL_MAPPING, false],
+      ['POST /candidates/search (display mapping)', DISPLAY_MAPPING, true],
     ] as const) {
-      const p = await searchProbe(client, label, mapping);
+      const p = await searchProbe(client, label, mapping, tolerant);
       if (!p.ok) return fail(p.detail);
+      if (p.probe === SKIPPED) continue; // connector does not map these optional fields
       probes.push(p.probe);
     }
 
@@ -163,12 +190,13 @@ export const unmappedColumnsLeakedCase: ConformanceCase = {
     //    body either (a careless connector might echo the plan / mapping).
     let countsSeen = 0;
     if (declared.length > 0) {
-      for (const [label, mapping] of [
-        ['POST /candidates/count (identity mapping)', MINIMAL_MAPPING],
-        ['POST /candidates/count (display mapping)', DISPLAY_MAPPING],
+      for (const [label, mapping, tolerant] of [
+        ['POST /candidates/count (identity mapping)', MINIMAL_MAPPING, false],
+        ['POST /candidates/count (display mapping)', DISPLAY_MAPPING, true],
       ] as const) {
-        const c = await countProbe(client, label, mapping);
+        const c = await countProbe(client, label, mapping, tolerant);
         if (!c.ok) return fail(c.detail);
+        if (c.res === SKIPPED) continue;
         countsSeen++;
         for (const col of declared) {
           if (c.res.bodyText.includes(col)) {

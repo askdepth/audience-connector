@@ -77,18 +77,25 @@ describe('S2 — the broken fixtures are wrong ONLY for their own case', () => {
   // make the "suite catches it" claim hollow). `negativeCount` is excluded
   // on purpose: `/candidates/count` is a shared primitive that P5/P6/P7 use
   // as a cross-check, so a broken count legitimately trips more than P3.
-  const spec: Array<[Bug, (typeof ALL_IDS)[number]]> = [
-    ['emptySchema', 'P2'],
-    ['noCursor', 'P4'],
-    ['ignoreExternalIdIn', 'P5'],
-    ['leakFilterAttribute', 'P6'],
-    ['ignoreSuppress', 'P7'],
+  //
+  // The third tuple element lists cases that share a primitive with the bug
+  // and so legitimately also fail:
+  //   * `ignoreExternalIdIn` — P4 and P7 now pin their bounded working sets
+  //     with an `externalId IN` clause (to stay size-agnostic, since cursorless
+  //     search is randomly sub-sampled per pull), so a connector that drops
+  //     that filter fails them too. That is a real defect both should catch.
+  const spec: Array<[Bug, (typeof ALL_IDS)[number], Array<(typeof ALL_IDS)[number]>]> = [
+    ['emptySchema', 'P2', []],
+    ['noCursor', 'P4', []],
+    ['ignoreExternalIdIn', 'P5', ['P4', 'P7']],
+    ['leakFilterAttribute', 'P6', []],
+    ['ignoreSuppress', 'P7', []],
   ];
 
-  for (const [bug, ownId] of spec) {
+  for (const [bug, ownId, alsoFails] of spec) {
     it(`${bug} leaves the other cases passing`, async () => {
       for (const id of ALL_IDS) {
-        if (id === ownId || id === 'P1') continue;
+        if (id === ownId || id === 'P1' || alsoFails.includes(id)) continue;
         const result = await byId(id).run(brokenClient(bug));
         expect(result, `${bug} unexpectedly broke ${id}: ${result.detail}`).toMatchObject({
           id,

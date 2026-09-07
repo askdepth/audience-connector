@@ -73,10 +73,16 @@ importers:
       '@askdepth/audience-contract':
         specifier: workspace:*
         version: link:../contract
+      express:
+        specifier: ^5.0.1
+        version: 5.2.1
       pg:
         specifier: ^8.13.1
         version: 8.23.0
     devDependencies:
+      '@types/express':
+        specifier: ^5.0.0
+        version: 5.0.6
       '@types/node':
         specifier: ^22.10.2
         version: 22.20.1

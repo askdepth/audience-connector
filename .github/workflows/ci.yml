@@ -46,6 +46,78 @@ jobs:
       # Same handler, Node runtime, exercising the built dist.
       - run: node examples/smoke.mjs
 
+  reference-postgres:
+    # S7 — the reference connector's Postgres variant is booted over the seeded
+    # synthetic base and the full conformance suite is run against it as a
+    # blocking gate. Separate job on purpose: it exercises the *built public*
+    # package exactly as a client integrator would, not the workspace internals.
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: reference_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      CI: 'true'
+      REFERENCE_SECRET: ci-reference-connector-secret
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/reference_test
+
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with: { version: 9 }
+      - uses: actions/setup-node@v7
+        with: { node-version: 22 }
+      - run: pnpm install --frozen-lockfile
+      # The variant consumes the built `@askdepth/audience-connector`.
+      - run: pnpm --recursive run build
+
+      - name: Load the 5,000-row synthetic seed
+        run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f packages/reference-connector/seed/fixtures.sql
+
+      - name: Start the Postgres variant
+        run: |
+          pnpm --filter @askdepth/reference-connector start:postgres > variant.log 2>&1 &
+          echo "VARIANT_PID=$!" >> "$GITHUB_ENV"
+
+      - name: Wait for "listening on :"
+        run: |
+          for i in $(seq 1 60); do
+            if grep -q 'listening on :' variant.log; then
+              cat variant.log
+              exit 0
+            fi
+            if ! kill -0 "$VARIANT_PID" 2>/dev/null; then
+              echo "variant exited before becoming ready:"; cat variant.log; exit 1
+            fi
+            sleep 1
+          done
+          echo "variant did not become ready in 60s:"; cat variant.log; exit 1
+
+      - name: Run the conformance suite against the variant (blocking gate)
+        run: |
+          node packages/connector/dist/bin/conformance.js conformance \
+            --url http://localhost:8787/askdepth/v1 \
+            --secret "$REFERENCE_SECRET" \
+            --unmapped-column internal_notes \
+            --unmapped-column crm_account_id \
+            --filter-only-attribute country
+
+      - name: Stop the variant
+        if: always()
+        run: kill "$VARIANT_PID" 2>/dev/null || true
+
   runtimes:
     # S9 — the multi-runtime claim is demonstrated, not asserted.
     runs-on: ubuntu-latest

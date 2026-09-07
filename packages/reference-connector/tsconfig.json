@@ -7,5 +7,5 @@
     "declarationMap": false,
     "noEmit": true
   },
-  "include": ["seed/**/*.ts", "__tests__/**/*.ts"]
+  "include": ["seed/**/*.ts", "src/**/*.ts", "scripts/**/*.ts", "__tests__/**/*.ts"]
 }

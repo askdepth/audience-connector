@@ -39,11 +39,23 @@ export interface ConformanceCaseContext {
    * Empty when the operator supplied no `--unmapped-column`.
    */
   readonly unmappedColumns: readonly string[];
+
+  /**
+   * Attribute names the operator has declared are **filter-only** — usable in
+   * `attr.*` criteria but never projected into a candidate row payload (they
+   * are absent from the connector's `returnable` list). Threaded from the CLI
+   * (`--filter-only-attribute`, repeatable) and consumed by P6 to pick the
+   * attribute it asserts is absent from every response row. Empty when the
+   * operator supplied none — P6 then keeps its structural + auto-discovery
+   * behaviour against the built-in fixture attributes.
+   */
+  readonly filterOnlyAttributes: readonly string[];
 }
 
 /** The context a case sees when the runner is given none (direct unit calls). */
 export const EMPTY_CASE_CONTEXT: ConformanceCaseContext = Object.freeze({
   unmappedColumns: Object.freeze([]) as readonly string[],
+  filterOnlyAttributes: Object.freeze([]) as readonly string[],
 });
 
 export interface ConformanceCase {

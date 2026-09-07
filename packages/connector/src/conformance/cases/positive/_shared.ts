@@ -10,14 +10,21 @@ type ParseError = { issues: Array<{ path: Array<PropertyKey>; message: string }>
 
 /**
  * Request `mapping` used by the search-shaped cases. Keys are the client's own
- * source columns (arbitrary labels here); values are canonical fields the
- * fixture connector maps. `externalId`/`email` are always returned regardless
- * — listing `name` proves a normal display projection round-trips.
+ * source columns (arbitrary labels here); values are canonical fields.
+ *
+ * Identity-only on purpose: `externalId` and `email` are the only two canonical
+ * fields *every* conformant connector must map (`email` is non-optional in
+ * `CanonicalFieldSchema`; every other field — `name`, `segment`, `signupAt`, …
+ * — is `.optional()`). `conformance-spec.md` never requires a connector to map
+ * an optional field, so a search-shaped positive case must not project one: a
+ * connector that legitimately does not map `name` answers `malformed_request`
+ * for a `name` projection target, and that is spec-correct behaviour, not a
+ * conformance failure. Cases that need to prove a *display* projection do so
+ * with their own tolerant probe.
  */
 export const STANDARD_MAPPING: Record<string, string> = {
   src_external_id: 'externalId',
   src_email: 'email',
-  src_name: 'name',
 };
 
 /** Flatten a Zod error into a single-line "path: message; …" string. */

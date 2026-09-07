@@ -6,6 +6,19 @@ deployed connector. The negative cases (N1–N8) are where the value is: a runne
 that passes everything is worse than none, because it turns an untested
 integration into a certified one.
 
+## Flags
+
+| flag | repeatable | purpose |
+|---|---|---|
+| `--url <url>` | no | Base URL of the connector, including its route prefix (`…/askdepth/v1`). |
+| `--secret <secret>` | no | Active signing secret. |
+| `--previous-secret <s>` | no | Previous signing secret, accepted during a rotation overlap. |
+| `--case <id>` | yes | Run only the named case id(s). |
+| `--unmapped-column <name>` | yes | A store column that exists in the backing data but is intentionally not in `fieldMapping`; case **N3** asserts it appears in no candidate-data response. |
+| `--filter-only-attribute <name>` | yes | An attribute usable in `attr.*` criteria but never projected into a row payload (absent from `returnable`); case **P6** asserts it is absent from every response row. With none supplied, P6 keeps its built-in structural + auto-discovery behaviour. |
+| `--json` | no | Emit machine-readable JSON instead of a table. |
+| `--timeout-ms <n>` | no | Per-case timeout in milliseconds (default 5000). |
+
 So the suite is itself under test. Every negative case ships with a
 **deliberately-broken fixture** — a genuine connector instance (or, where the
 frozen handler makes the violation otherwise unreachable, a signed fetch-seam

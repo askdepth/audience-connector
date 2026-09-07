@@ -61,6 +61,7 @@ export const UNMAPPED_COLUMNS = ['internal_notes', 'secret_note'] as const;
 /** The runner context that hands N3 its out-of-band unmapped-column list. */
 export const WITH_UNMAPPED: ConformanceCaseContext = {
   unmappedColumns: [...UNMAPPED_COLUMNS],
+  filterOnlyAttributes: [],
 };
 
 export const SEED_ROW_COUNT = 900;
