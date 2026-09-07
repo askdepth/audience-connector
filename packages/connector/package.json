@@ -1,6 +1,6 @@
 {
   "name": "@askdepth/audience-connector",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "The Askdepth Audience SDK connector — a Web-standard Request → Response handler a client deploys inside their own perimeter. Zero runtime dependencies in core; postgres and rest adapters; Express/Fastify/Lambda shims.",
   "license": "MIT",
   "repository": {
