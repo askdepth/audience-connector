@@ -8,6 +8,11 @@ import {
   CountRequestSchema,
   CountResponseSchema,
   SearchRequestSchema,
+  SearchResponseSchema,
+  CandidateRowSchema,
+  ROW_CAP,
+  DEFAULT_BASE_PATH,
+  ENDPOINTS,
 } from '../src/endpoints';
 
 describe('CanonicalFieldSchema (fields.ts)', () => {
@@ -217,5 +222,85 @@ describe('endpoints.ts', () => {
         cursor: 'opaque-cursor-token',
       }).success,
     ).toBe(true);
+  });
+});
+
+describe('SearchResponseSchema (endpoints.ts)', () => {
+  const row = { externalId: 'u_1', email: 'a@b.com' };
+
+  it('accepts an envelope with rows and a nextCursor', () => {
+    expect(SearchResponseSchema.safeParse({ rows: [row], nextCursor: 'opaque' }).success).toBe(true);
+  });
+
+  it('accepts an envelope with rows and no nextCursor (last page)', () => {
+    expect(SearchResponseSchema.safeParse({ rows: [row] }).success).toBe(true);
+  });
+
+  it('accepts an empty rows array', () => {
+    expect(SearchResponseSchema.safeParse({ rows: [] }).success).toBe(true);
+  });
+
+  it('accepts fully-populated rows including attributes', () => {
+    expect(
+      SearchResponseSchema.safeParse({
+        rows: [
+          {
+            externalId: 'u_1',
+            email: 'a@b.com',
+            name: 'A',
+            segment: 'pro',
+            signupAt: '2027-01-01T00:00:00.000Z',
+            isActive: true,
+            contactable: true,
+            attributes: { tier: 'gold' },
+          },
+        ],
+      }).success,
+    ).toBe(true);
+  });
+
+  it('rejects a response with rows missing', () => {
+    expect(SearchResponseSchema.safeParse({ nextCursor: 'x' }).success).toBe(false);
+  });
+
+  it('rejects a response whose rows is not an array', () => {
+    expect(SearchResponseSchema.safeParse({ rows: 'nope' }).success).toBe(false);
+    expect(SearchResponseSchema.safeParse({ rows: { 0: row } }).success).toBe(false);
+  });
+
+  it('rejects a row with a malformed email', () => {
+    expect(
+      SearchResponseSchema.safeParse({ rows: [{ externalId: 'u_1', email: 'nope' }] }).success,
+    ).toBe(false);
+  });
+
+  it('CandidateRowSchema is structurally the canonical field schema', () => {
+    expect(CandidateRowSchema.safeParse(row).success).toBe(true);
+    expect(CandidateRowSchema.safeParse({ email: 'a@b.com' }).success).toBe(false); // externalId required
+  });
+});
+
+describe('endpoint constants (endpoints.ts)', () => {
+  it('ROW_CAP is the 1,000-row hard cap', () => {
+    expect(ROW_CAP).toBe(1000);
+  });
+
+  it('SearchRequestSchema enforces exactly ROW_CAP', () => {
+    const base = { criteria: { all: [] }, mapping: {} };
+    expect(SearchRequestSchema.safeParse({ ...base, limit: ROW_CAP }).success).toBe(true);
+    expect(SearchRequestSchema.safeParse({ ...base, limit: ROW_CAP + 1 }).success).toBe(false);
+  });
+
+  it('DEFAULT_BASE_PATH is the default route prefix', () => {
+    expect(DEFAULT_BASE_PATH).toBe('/askdepth/v1');
+  });
+
+  it('ENDPOINTS maps the four subpaths', () => {
+    expect(ENDPOINTS).toEqual({
+      health: '/health',
+      schema: '/schema',
+      count: '/candidates/count',
+      search: '/candidates/search',
+    });
   });
 });

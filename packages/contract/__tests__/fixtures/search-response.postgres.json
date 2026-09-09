@@ -1,0 +1,205 @@
+{
+  "rows": [
+    {
+      "externalId": "ref-04801",
+      "email": "user-04801@example.com",
+      "attributes": {
+        "plan": "business",
+        "deviceType": "android"
+      }
+    },
+    {
+      "externalId": "ref-02642",
+      "email": "user-02642@example.com",
+      "attributes": {
+        "plan": "enterprise",
+        "deviceType": "web"
+      }
+    },
+    {
+      "externalId": "ref-00045",
+      "email": "user-00045@example.com",
+      "attributes": {
+        "plan": "free",
+        "deviceType": "android"
+      }
+    },
+    {
+      "externalId": "ref-02381",
+      "email": "user-02381@example.com",
+      "attributes": {
+        "plan": "pro",
+        "deviceType": "android"
+      }
+    },
+    {
+      "externalId": "ref-01713",
+      "email": "user-01713@example.com",
+      "attributes": {
+        "plan": "free",
+        "deviceType": "android"
+      }
+    },
+    {
+      "externalId": "ref-02368",
+      "email": "user-02368@example.com",
+      "attributes": {
+        "plan": "enterprise",
+        "deviceType": "web"
+      }
+    },
+    {
+      "externalId": "ref-00207",
+      "email": "user-00207@example.com",
+      "attributes": {
+        "plan": "pro",
+        "deviceType": "web"
+      }
+    },
+    {
+      "externalId": "ref-04097",
+      "email": "user-04097@example.com",
+      "attributes": {
+        "plan": "enterprise",
+        "deviceType": "web"
+      }
+    },
+    {
+      "externalId": "ref-00696",
+      "email": "user-00696@example.com",
+      "attributes": {
+        "plan": "free",
+        "deviceType": "web"
+      }
+    },
+    {
+      "externalId": "ref-03779",
+      "email": "user-03779@example.com",
+      "attributes": {
+        "plan": "enterprise",
+        "deviceType": "ios"
+      }
+    },
+    {
+      "externalId": "ref-02017",
+      "email": "user-02017@example.com",
+      "attributes": {
+        "plan": "business",
+        "deviceType": "ios"
+      }
+    },
+    {
+      "externalId": "ref-03685",
+      "email": "user-03685@example.com",
+      "attributes": {
+        "plan": "enterprise",
+        "deviceType": "web"
+      }
+    },
+    {
+      "externalId": "ref-00541",
+      "email": "user-00541@example.com",
+      "attributes": {
+        "plan": "pro",
+        "deviceType": "web"
+      }
+    },
+    {
+      "externalId": "ref-04436",
+      "email": "user-04436@example.com",
+      "attributes": {
+        "plan": "pro",
+        "deviceType": "web"
+      }
+    },
+    {
+      "externalId": "ref-02559",
+      "email": "user-02559@example.com",
+      "attributes": {
+        "plan": "pro",
+        "deviceType": "ios"
+      }
+    },
+    {
+      "externalId": "ref-04105",
+      "email": "user-04105@example.com",
+      "attributes": {
+        "plan": "pro",
+        "deviceType": "ios"
+      }
+    },
+    {
+      "externalId": "ref-02587",
+      "email": "user-02587@example.com",
+      "attributes": {
+        "plan": "pro",
+        "deviceType": "android"
+      }
+    },
+    {
+      "externalId": "ref-01116",
+      "email": "user-01116@example.com",
+      "attributes": {
+        "plan": "enterprise",
+        "deviceType": "android"
+      }
+    },
+    {
+      "externalId": "ref-03137",
+      "email": "user-03137@example.com",
+      "attributes": {
+        "plan": "business",
+        "deviceType": "ios"
+      }
+    },
+    {
+      "externalId": "ref-00295",
+      "email": "user-00295@example.com",
+      "attributes": {
+        "plan": "pro",
+        "deviceType": "android"
+      }
+    },
+    {
+      "externalId": "ref-01263",
+      "email": "user-01263@example.com",
+      "attributes": {
+        "plan": "pro",
+        "deviceType": "android"
+      }
+    },
+    {
+      "externalId": "ref-01647",
+      "email": "user-01647@example.com",
+      "attributes": {
+        "plan": "pro",
+        "deviceType": "ios"
+      }
+    },
+    {
+      "externalId": "ref-01255",
+      "email": "user-01255@example.com",
+      "attributes": {
+        "plan": "free",
+        "deviceType": "web"
+      }
+    },
+    {
+      "externalId": "ref-04595",
+      "email": "user-04595@example.com",
+      "attributes": {
+        "plan": "business",
+        "deviceType": "android"
+      }
+    },
+    {
+      "externalId": "ref-03592",
+      "email": "user-03592@example.com",
+      "attributes": {
+        "plan": "pro",
+        "deviceType": "web"
+      }
+    }
+  ],
+  "nextCursor": "eyJ2IjoxLCJhZnRlciI6eyJoIjoiMDE3ZWZmOGQ4MDhiMGQ5OWQzY2IyN2RiNTZmNWFmODciLCJpZCI6InJlZi0wMzU5MiJ9LCJxaCI6IjY4N2YzODcxNTJkZmQ0YmQiLCJzZWVkIjoiMGU1ZTQxNzVhMzMyOGU3NjlkMWU2MTRhZTdmYWFmYmEifQ"
+}
