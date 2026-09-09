@@ -167,3 +167,12 @@ describe('REPLAY_WINDOW_SECONDS', () => {
     expect(verify('', String(ts), sig, s, ts + REPLAY_WINDOW_SECONDS + 1).valid).toBe(false);
   });
 });
+
+describe('verify — return shape on success', () => {
+  it('omits `reason` when valid is true', () => {
+    const s = Buffer.from('shape-test-secret', 'utf8');
+    const ts = 1_700_000_000;
+    const sig = sign('', ts, s);
+    expect(verify('', String(ts), sig, s, ts)).toEqual({ valid: true });
+  });
+});

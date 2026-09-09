@@ -69,5 +69,7 @@ export function verify(
   // rather than returning false. This is not itself a timing side-channel:
   // it reveals only "well-formed or not", never anything about the secret.
   if (provided.length !== expectedBuf.length) return { valid: false, reason: 'mismatch' };
-  return { valid: timingSafeEqual(provided, expectedBuf), reason: 'mismatch' };
+  // `reason` is only meaningful on failure — omit it when the signature verifies.
+  const valid = timingSafeEqual(provided, expectedBuf);
+  return valid ? { valid: true } : { valid: false, reason: 'mismatch' };
 }
