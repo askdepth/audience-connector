@@ -1,5 +1,12 @@
 import { describe, it, expect } from 'vitest';
-import { sign, verify } from '../src/signing';
+import {
+  sign,
+  verify,
+  signedBodyFor,
+  SIGNATURE_HEADER,
+  TIMESTAMP_HEADER,
+  REPLAY_WINDOW_SECONDS,
+} from '../src/signing';
 
 const secret = Buffer.from('connector-secret-abc123', 'utf8');
 const otherSecret = Buffer.from('a-different-connector-secret', 'utf8');
@@ -117,5 +124,46 @@ describe('verify — replay of an already-seen signature', () => {
       valid: false,
       reason: 'expired',
     });
+  });
+});
+
+describe('signedBodyFor — the rule that silently breaks health polling if the platform gets it wrong', () => {
+  it('GET signs the empty body string, whatever raw bytes were passed', () => {
+    expect(signedBodyFor('GET', 'anything')).toBe('');
+    expect(signedBodyFor('get', '{"x":1}')).toBe('');
+  });
+
+  it('HEAD signs the empty body string', () => {
+    expect(signedBodyFor('HEAD', 'anything')).toBe('');
+  });
+
+  it('POST signs the exact raw body', () => {
+    const b = JSON.stringify({ criteria: { all: [] }, mapping: {} });
+    expect(signedBodyFor('POST', b)).toBe(b);
+    expect(signedBodyFor('post', b)).toBe(b);
+  });
+
+  it('every other method signs the exact raw body', () => {
+    expect(signedBodyFor('PUT', 'x')).toBe('x');
+    expect(signedBodyFor('DELETE', 'x')).toBe('x');
+    expect(signedBodyFor('PATCH', 'x')).toBe('x');
+  });
+});
+
+describe('wire header names', () => {
+  it('are the two x-askdepth-* names', () => {
+    expect(SIGNATURE_HEADER).toBe('x-askdepth-signature');
+    expect(TIMESTAMP_HEADER).toBe('x-askdepth-timestamp');
+  });
+});
+
+describe('REPLAY_WINDOW_SECONDS', () => {
+  it('is the 300s replay window the verifier enforces', () => {
+    expect(REPLAY_WINDOW_SECONDS).toBe(300);
+    const s = Buffer.from('window-test-secret', 'utf8');
+    const ts = 1_700_000_000;
+    const sig = sign('', ts, s);
+    expect(verify('', String(ts), sig, s, ts + REPLAY_WINDOW_SECONDS).valid).toBe(true);
+    expect(verify('', String(ts), sig, s, ts + REPLAY_WINDOW_SECONDS + 1).valid).toBe(false);
   });
 });
