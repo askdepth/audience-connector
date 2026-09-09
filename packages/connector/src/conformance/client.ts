@@ -5,28 +5,17 @@
 // defect.
 //
 // HMAC lives in `@askdepth/audience-contract`'s `sign()` and is never
-// reimplemented here.
+// reimplemented here. The wire header names and `signedBodyFor()` — the rule
+// for *what* gets signed — come from the same package: it is the single source
+// of truth for the signing scheme, and this file still imports nothing from
+// connector internals.
 
-import { sign } from '@askdepth/audience-contract';
-
-// Wire header names. Mirrored deliberately as literals rather than imported
-// from `verify-request.ts` (which exports the same constants) so this file has
-// zero dependency on connector internals. If the contract's signing scheme
-// changes these must change with it — `verify-request.ts` is the source of
-// truth on the connector side.
-const SIGNATURE_HEADER = 'x-askdepth-signature';
-const TIMESTAMP_HEADER = 'x-askdepth-timestamp';
-
-/**
- * The bytes that get signed for a given method. GET/HEAD carry no body and
- * sign the empty string (so the signed payload is `${timestamp}.`); every
- * other method signs the exact request body. This mirrors `signedBodyFor()` in
- * `verify-request.ts`.
- */
-function signedBodyFor(method: string, rawBody: string): string {
-  const m = method.toUpperCase();
-  return m === 'GET' || m === 'HEAD' ? '' : rawBody;
-}
+import {
+  sign,
+  signedBodyFor,
+  SIGNATURE_HEADER,
+  TIMESTAMP_HEADER,
+} from '@askdepth/audience-contract';
 
 /** A structurally valid `v1=<64 hex>` signature that will never verify. */
 function corruptSignature(signature: string): string {

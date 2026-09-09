@@ -7,11 +7,20 @@
 // HMAC itself lives in `@askdepth/audience-contract`'s `verify()` and is not
 // reimplemented here.
 
-import { verify } from '@askdepth/audience-contract';
+import {
+  verify,
+  signedBodyFor,
+  SIGNATURE_HEADER,
+  TIMESTAMP_HEADER,
+} from '@askdepth/audience-contract';
 import { ConnectorError } from './errors';
 
-export const SIGNATURE_HEADER = 'x-askdepth-signature';
-export const TIMESTAMP_HEADER = 'x-askdepth-timestamp';
+// Re-exported from the contract so this module's existing import surface is
+// unchanged — internal callers and `__tests__/verify-request.test.ts` still do
+// `import { SIGNATURE_HEADER, TIMESTAMP_HEADER } from './verify-request'`. The
+// contract is the single definition; see `@askdepth/audience-contract`'s
+// `signing.ts`.
+export { signedBodyFor, SIGNATURE_HEADER, TIMESTAMP_HEADER };
 
 export interface VerifyRequestConfig {
   /** Active signing secret. */
@@ -24,16 +33,6 @@ export interface VerifyRequestConfig {
 
 function toBuffer(secret: string | Buffer): Buffer {
   return typeof secret === 'string' ? Buffer.from(secret, 'utf8') : secret;
-}
-
-/**
- * The body that was signed, for a given method. Methods that carry no request
- * body (GET, HEAD) sign `${timestamp}.` — i.e. an empty body string. Every
- * other method signs `${timestamp}.${rawBody}` over the exact bytes received.
- */
-export function signedBodyFor(method: string, rawBody: string): string {
-  const m = method.toUpperCase();
-  return m === 'GET' || m === 'HEAD' ? '' : rawBody;
 }
 
 /**
