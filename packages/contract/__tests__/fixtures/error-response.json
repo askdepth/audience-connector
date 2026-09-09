@@ -1,0 +1,6 @@
+{
+  "error": {
+    "code": "limit_exceeded",
+    "message": "Request exceeds an allowed limit."
+  }
+}
