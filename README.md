@@ -11,6 +11,8 @@ over a seeded synthetic user base — and a **conformance CLI** that validates a
 deployed connector against the §7.1 checklist before it points at production.
 
 - **Deploying a connector:** [`docs/deployment.md`](docs/deployment.md)
+- **Platform-side integration:** [`docs/platform-integration.md`](docs/platform-integration.md)
+  — the contract exports the platform's HTTP client consumes
 - **Runtime matrix:** [`docs/runtime-support.md`](docs/runtime-support.md)
 - **Conformance CLI:** [`docs/conformance.md`](docs/conformance.md) — how to run
   it; [`docs/conformance-self-check.md`](docs/conformance-self-check.md) maps

@@ -60,8 +60,9 @@ repo**, and the installed `node_modules/.bin/audience-connector` runs the full
 `__tests__/cli-packaging.test.ts` guard keeps a future `files`/tsup change from
 silently dropping the bin from the tarball.
 
-The CLI ships from `@askdepth/audience-connector@0.1.1` onward (the earlier
-`0.1.0` on the registry predated it and had no `bin`). From a clean directory:
+The CLI has shipped in every `@askdepth/audience-connector` release since
+`0.1.1`; the initial `0.1.0` on the registry had no `bin`. From a clean
+directory:
 
 ```
 npx @askdepth/audience-connector conformance --url <url> --secret <secret>
