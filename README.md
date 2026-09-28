@@ -45,17 +45,25 @@ wire contract only.
 
 ## Publishing
 
-`@askdepth/audience-contract` is published **only** by the tag-driven
-`.github/workflows/release.yml` (push a `v*` tag). That workflow publishes with
-npm provenance via GitHub Actions OIDC. **Do not `npm publish` from a local
-machine** — provenance attestation is tied to the workflow, and a local publish
-silently turns it off. The version in `packages/contract/package.json` and the
-git tag must agree.
+Publishable packages (`@askdepth/audience-contract`, `@askdepth/audience-connector`)
+are released through [Changesets](https://github.com/changesets/changesets) and
+`.github/workflows/release.yml` on pushes to `main`:
 
-The **first ever** publish of the package is a one-time manual step by the npm
-org owner (`npm login` + `npm publish --access public --provenance`), because npm
-Trusted Publishing can only be configured on a package that already exists on the
-registry. Every publish after that goes through the workflow.
+1. In a feature PR, run `pnpm changeset`, commit the generated file under
+   `.changeset/`, and merge via `dev` → `main` as usual.
+2. On `main`, the release workflow opens (or updates) a PR titled
+   `chore(release): version packages` with version bumps and changelogs.
+3. Merge that release PR when ready — the same workflow then builds, tests, and
+   publishes to npm with provenance, creates git tags, and opens GitHub Releases.
+
+**Do not `npm publish` from a local machine** — provenance attestation is tied to
+the workflow OIDC token, and a local publish silently turns it off.
+
+Infrastructure-only PRs (docs, CI, examples) can add the `skip-changeset` label
+to skip the CI check that requires a changeset file.
+
+Contract changes remain breaking releases: a PR that touches `packages/contract/`
+must state the bump and migration impact and needs explicit sign-off before merge.
 
 ## Contributing
 

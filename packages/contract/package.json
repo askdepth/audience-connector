@@ -27,7 +27,8 @@
   "scripts": {
     "build": "tsup",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "postpublish": "node ../../scripts/wait-for-npm.mjs"
   },
   "dependencies": {
     "zod": "^4.4.3"

@@ -42,6 +42,21 @@ jobs:
       - uses: actions/setup-node@v7
         with: { node-version: 22 }
       - run: pnpm install --frozen-lockfile
+
+      - name: Require changeset
+        if: >
+          github.event_name == 'pull_request' &&
+          !contains(github.event.pull_request.labels.*.name, 'skip-changeset') &&
+          !startsWith(github.head_ref, 'changeset-release/')
+        run: |
+          set -euo pipefail
+          count="$(find .changeset -maxdepth 1 -type f -name '*.md' ! -name 'README.md' | wc -l | tr -d ' ')"
+          if [ "$count" -eq 0 ]; then
+            echo "::error::No changeset for this PR. Run \`pnpm changeset\` or add the \`skip-changeset\` label."
+            exit 1
+          fi
+          echo "Found $count changeset file(s)."
+
       # Build first so `@askdepth/audience-connector` can resolve the built
       # `@askdepth/audience-contract` dist, and so the connector's
       # build-artefact test has something to assert against.

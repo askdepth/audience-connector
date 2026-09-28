@@ -1,24 +1,30 @@
 name: Release
 
-# Push a tag like `vX.Y.Z` on `main` to publish. The version actually published
-# is read from each package's package.json, not from the tag — keep them in sync.
-# Both packages are published from a single job, in order, because
-# @askdepth/audience-connector depends on a pinned exact version of
-# @askdepth/audience-contract that must already resolve on the registry.
+# Changesets release loop on `main`:
+# 1. Pending `.changeset/*.md` → open/update PR "chore(release): version packages"
+# 2. That PR is merged → no pending changesets, package.json ahead of npm → publish
+#
+# Do not publish from a laptop — provenance is tied to this workflow's OIDC token.
 on:
   push:
-    tags: ['v*']
+    branches: [main]
+
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: false
 
 permissions:
-  contents: read
-  id-token: write # required for npm provenance (see PROVENANCE note below)
+  contents: write
+  pull-requests: write
+  id-token: write # npm provenance
 
 jobs:
-  publish:
+  release:
+    name: Version or publish
     runs-on: ubuntu-latest
 
-    # The connector's S6 suite refuses to skip when CI is set, so the release
-    # job needs a Postgres just like ci.yml's workspace job.
+    # Full verify before version PR or publish. The connector's S6 suite refuses
+    # to skip when CI is set, so this job needs Postgres like ci.yml.
     services:
       postgres:
         image: postgres:16
@@ -35,18 +41,28 @@ jobs:
           --health-retries 5
 
     env:
+      CI: 'true'
       TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/connector_test
 
     steps:
       - uses: actions/checkout@v7
+        with:
+          # changesets needs full history for accurate changelogs / bumps
+          fetch-depth: 0
+
       - uses: pnpm/action-setup@v6
         with: { version: 9 }
+
       - uses: actions/setup-node@v7
-        with: { node-version: 22, registry-url: 'https://registry.npmjs.org' }
+        with:
+          node-version: 22
+          cache: pnpm
+          registry-url: https://registry.npmjs.org
 
       - run: pnpm install --frozen-lockfile
 
-      # Build + verify BOTH packages before publishing either one.
+      # Build + verify BOTH publishable packages before opening a version PR
+      # or publishing either one.
       - run: pnpm --filter @askdepth/audience-contract  build
       - run: pnpm --filter @askdepth/audience-contract  typecheck
       - run: pnpm --filter @askdepth/audience-contract  test
@@ -54,34 +70,18 @@ jobs:
       - run: pnpm --filter @askdepth/audience-connector typecheck
       - run: pnpm --filter @askdepth/audience-connector test
 
-      # 1. Contract first.
-      - name: Publish @askdepth/audience-contract
-        run: pnpm --filter @askdepth/audience-contract publish --no-git-checks --access public
+      - name: Create Version PR or Publish
+        uses: changesets/action@v1
+        with:
+          version: pnpm version-packages
+          publish: pnpm release
+          title: 'chore(release): version packages'
+          commit: 'chore(release): version packages'
+          createGithubReleases: true
         env:
+          GITHUB_TOKEN: ${{ secrets.RELEASE_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-          # Requires this repo to be public (provenance links to public source)
-          # and `id-token: write` on the job (set above).
-          NPM_CONFIG_PROVENANCE: 'true'
-
-      # 2. Do not publish the connector until the contract version it pins is
-      #    actually visible on the registry (npm is not read-your-writes).
-      - name: Wait for the contract on the registry
-        run: |
-          VERSION=$(node -p "require('./packages/contract/package.json').version")
-          echo "waiting for @askdepth/audience-contract@$VERSION ..."
-          for i in $(seq 1 30); do
-            if npm view "@askdepth/audience-contract@$VERSION" version >/dev/null 2>&1; then
-              echo "visible after attempt $i"
-              exit 0
-            fi
-            sleep 10
-          done
-          echo "::error::@askdepth/audience-contract@$VERSION not on registry after 5 min"
-          exit 1
-
-      # 3. Connector second.
-      - name: Publish @askdepth/audience-connector
-        run: pnpm --filter @askdepth/audience-connector publish --no-git-checks --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+          # Requires a public repo (provenance links to public source) and
+          # `id-token: write` on the job (set above).
           NPM_CONFIG_PROVENANCE: 'true'

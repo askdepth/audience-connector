@@ -7,9 +7,14 @@
   "scripts": {
     "build": "pnpm --recursive run build",
     "test": "pnpm --recursive run test",
-    "typecheck": "pnpm --recursive run typecheck"
+    "typecheck": "pnpm --recursive run typecheck",
+    "changeset": "changeset",
+    "version-packages": "changeset version",
+    "release": "changeset publish"
   },
   "devDependencies": {
+    "@changesets/changelog-github": "^1.0.1",
+    "@changesets/cli": "^3.0.3",
     "wrangler": "^3.114.14"
   },
   "engines": {
