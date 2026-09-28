@@ -43,11 +43,16 @@ jobs:
         with: { node-version: 22 }
       - run: pnpm install --frozen-lockfile
 
+      # Batch merges (dev → main) and Changesets version PRs are not release
+      # notes themselves. `gh run rerun` also reuses the original event payload,
+      # so a label added after the first run is invisible on rerun — prefer the
+      # base/head exemption for the release train, and use join() for labels.
       - name: Require changeset
         if: >
           github.event_name == 'pull_request' &&
-          !contains(github.event.pull_request.labels.*.name, 'skip-changeset') &&
-          !startsWith(github.head_ref, 'changeset-release/')
+          !(github.base_ref == 'main' && github.head_ref == 'dev') &&
+          !startsWith(github.head_ref, 'changeset-release/') &&
+          !contains(join(github.event.pull_request.labels.*.name, ','), 'skip-changeset')
         run: |
           set -euo pipefail
           count="$(find .changeset -maxdepth 1 -type f -name '*.md' ! -name 'README.md' | wc -l | tr -d ' ')"
